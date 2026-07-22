@@ -8,13 +8,17 @@
 
 ## 1. 本地：Git 推送
 
+在 GitHub 创建私有仓库后运行：
+
 ```powershell
 cd F:\RL-2048
-git init
-git add .
-git commit -m "Initial commit: RL-2048 DQN baseline and eval pipeline"
+.\scripts\github_bootstrap.ps1 -RemoteUrl https://github.com/<user>/RL-2048.git
+```
+
+或手动：
+
+```powershell
 git remote add origin https://github.com/<user>/RL-2048.git
-git branch -M main
 git push -u origin main
 ```
 
