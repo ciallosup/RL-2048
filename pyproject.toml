@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rl2048"
+version = "0.1.0"
+description = "2048 deep reinforcement learning environment and experiments"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "gymnasium>=1.0.0",
+    "numpy>=1.26.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0"]
+viz = []
+train = ["torch>=2.0", "pyyaml>=6.0"]
+
+[project.scripts]
+rl2048-play = "rl2048.viz.app:main"
+rl2048-eval = "rl2048.eval.cli:main"
+rl2048-train = "rl2048.rl.train_cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]

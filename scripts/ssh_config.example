@@ -1,0 +1,12 @@
+# Copy this block into C:\Users\<you>\.ssh\config (Windows) or ~/.ssh/config (Linux/macOS).
+# Replace HostName and Port with values from the AutoDL instance page.
+
+Host autodl-rl2048
+    HostName connect.westb.seetacloud.com
+    Port 12345
+    User root
+    # IdentityFile ~/.ssh/id_ed25519
+
+# Connect:  ssh autodl-rl2048
+# Cursor:    Ctrl+Shift+P -> Remote-SSH: Connect to Host -> autodl-rl2048
+#            Open folder: /root/autodl-tmp/RL-2048

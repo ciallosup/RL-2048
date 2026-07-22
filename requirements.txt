@@ -1,0 +1,2 @@
+# Install via: pip install -e ".[dev,viz]"
+# Core deps are declared in pyproject.toml.

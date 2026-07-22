@@ -1,0 +1,26 @@
+run_name: e2_vanilla_dqn
+train_seed: 0
+total_env_steps: 500000
+max_episode_steps: 500
+gamma: 0.99
+lr: 0.0001
+batch_size: null
+replay_capacity: 100000
+learning_starts: 10000
+train_freq: 4
+target_update_freq: 1000
+epsilon_start: 1.0
+epsilon_end: 0.05
+epsilon_decay_fraction: 0.8
+grad_clip_norm: 10.0
+use_double_dqn: false
+huber_delta: 1.0
+obs_scale: 16.0
+hidden_dims: [256, 256]
+log_freq: 1000
+eval_freq: 0
+checkpoint_freq: 50000
+output_dir: results/runs/e2_vanilla
+device: auto
+num_eval_episodes: 1000
+eval_seed_set: val
