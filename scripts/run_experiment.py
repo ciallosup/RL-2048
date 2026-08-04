@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -73,12 +72,29 @@ def main() -> None:
         config.train_seed = args.seed_start + offset
         if args.skip_train:
             continue
+        print(
+            f"[seed {config.train_seed}] start "
+            f"({offset + 1}/{args.train_seeds}) double={config.use_double_dqn} "
+            f"steps={config.total_env_steps}",
+            flush=True,
+        )
         result = Trainer(config).train()
         eval_summary = evaluate_checkpoint(
             result.checkpoint_path,
             episodes=config.num_eval_episodes,
             seed_set=config.eval_seed_set,
             max_episode_steps=config.max_episode_steps,
+        )
+        score_mean = float(eval_summary.get("score_stats", {}).get("mean", 0.0))
+        max_tile_mean = float(eval_summary.get("max_tile_stats", {}).get("mean", 0.0))
+        print(
+            f"[seed {config.train_seed}] done "
+            f"P(2048)={eval_summary.get('p_reach_2048', 0):.1%} "
+            f"P(1024)={eval_summary.get('p_reach_1024', 0):.1%} "
+            f"score={score_mean:.0f} "
+            f"max_tile={max_tile_mean:.0f} "
+            f"ckpt={result.checkpoint_path}",
+            flush=True,
         )
         runs.append(
             {

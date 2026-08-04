@@ -20,7 +20,7 @@ hidden_dims: [256, 256]
 log_freq: 2000
 eval_freq: 0
 checkpoint_freq: 50000
-output_dir: /root/autodl-tmp/RL-2048/results/runs/e1_smoke
+output_dir: results/runs/e1_smoke
 device: auto
 num_eval_episodes: 200
 eval_seed_set: dev

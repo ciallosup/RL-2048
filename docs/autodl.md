@@ -85,13 +85,42 @@ rl2048-play
 
 ## 云专用配置
 
-[`configs/autodl/`](../configs/autodl/) 中的 YAML 将 `output_dir` 指向数据盘绝对路径，避免 checkpoint 写入系统盘。
+[`configs/autodl/`](../configs/autodl/) 中的 YAML 与本地实验配置超参一致；`output_dir` 为相对路径（`results/...`）。请把仓库放在数据盘 `/root/autodl-tmp/RL-2048`，这样 checkpoint 不会写到系统盘。
 
 ## 注意事项
 
 | 风险 | 应对 |
 |------|------|
 | SSH 断开杀训练 | 使用 tmux |
-| pip 覆盖 CUDA torch | `setup_autodl.sh` 使用 `--no-deps` |
+| pip 覆盖 CUDA torch | `setup_autodl.sh` 使用 `--no-deps`，且 venv 带 `--system-site-packages` 复用镜像 torch |
 | 系统盘清空 | 代码与 results 均放 `/root/autodl-tmp` |
 | 费用 | 先跑 `e1_smoke.yaml` 估算耗时 |
+
+## 正式多 seed 实验（E1 / E2）
+
+在 tmux 中：
+
+```bash
+cd /root/autodl-tmp/RL-2048
+git pull   # 或 checkout 含修复的分支
+bash scripts/setup_autodl.sh   # 仅首次 / 依赖变更时
+source .venv/bin/activate
+
+tmux new -s train
+# E1 Double DQN + E2 Vanilla DQN，各 5 个 train seed；val 1000 局评估
+bash scripts/run_cloud_experiments.sh
+# 或只跑训练、跳过基线评估：
+# SKIP_BASELINE=1 bash scripts/run_cloud_experiments.sh
+# 改 seed 数：TRAIN_SEEDS=3 bash scripts/run_cloud_experiments.sh
+```
+
+产出：
+
+| 文件 | 内容 |
+|------|------|
+| `results/experiments/e1_latest.json` | Double DQN 各 seed 评估 |
+| `results/experiments/e2_latest.json` | Vanilla DQN 各 seed 评估 |
+| `results/experiments/e1_e2_compare.json` | 均值±标准差汇总 |
+| `results/runs/e1/`、`results/runs/e2_vanilla/` | 各 seed checkpoint |
+
+单 seed 约 500k steps；RTX 4080 上冒烟 100k ≈ 3 分钟，正式 5×2 seeds 预计数小时量级，务必放在 tmux 内。

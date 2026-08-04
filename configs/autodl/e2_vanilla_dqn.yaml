@@ -20,7 +20,7 @@ hidden_dims: [256, 256]
 log_freq: 1000
 eval_freq: 0
 checkpoint_freq: 50000
-output_dir: /root/autodl-tmp/RL-2048/results/runs/e2_vanilla
+output_dir: results/runs/e2_vanilla
 device: auto
 num_eval_episodes: 1000
 eval_seed_set: val
