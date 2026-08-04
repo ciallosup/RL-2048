@@ -254,9 +254,19 @@ data/seeds/     固定评估种子池（git 忽略）
 
 云专用配置在 `configs/autodl/`（`output_dir` 指向数据盘）。
 
-## 下一步（路线图 E2–E4）
+## 正式多 seed（E1 / E2）
 
-- E2：vanilla vs Double DQN 配对比较
+AutoDL 上（tmux）：
+
+```bash
+bash scripts/run_cloud_experiments.sh
+# TRAIN_SEEDS=5 SKIP_BASELINE=0 可覆盖
+```
+
+汇总：`results/experiments/e1_e2_compare.json`（由 `scripts/summarize_experiments.py` 生成）。
+
+## 下一步（路线图 E3–E4）
+
 - E3：γ 扫描；E4：n-step
 
 

@@ -93,11 +93,12 @@ class Trainer:
             next_obs, reward, terminated, truncated, next_info = self.env.step(action)
             done = terminated or truncated
 
+            # Store raw exponent obs; compute_loss / select_action scale once.
             transition = Transition(
-                state=self.agent.scale_obs(obs, self.config.obs_scale),
+                state=obs.astype(np.float32, copy=False),
                 action=action,
                 reward=reward,
-                next_state=self.agent.scale_obs(next_obs, self.config.obs_scale),
+                next_state=next_obs.astype(np.float32, copy=False),
                 terminated=terminated,
                 truncated=truncated,
                 valid_mask=mask.astype(np.bool_),
@@ -160,13 +161,16 @@ class Trainer:
                 self.episode_idx += 1
                 obs, info = self.env.reset(seed=self._episode_reset_seed())
 
+        # Always write a stable final path (periodic saves may overwrite last_checkpoint).
+        final_path = self.run_dir / "checkpoint_final.pt"
         save_checkpoint(
-            last_checkpoint,
+            final_path,
             agent=self.agent,
             config=self.config,
             env_steps=self.env_steps,
             episode_idx=self.episode_idx,
         )
+        last_checkpoint = final_path
         self.logger.save_state()
         return TrainResult(
             run_dir=self.run_dir,

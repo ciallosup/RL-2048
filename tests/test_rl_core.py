@@ -122,3 +122,50 @@ def test_vanilla_vs_double_switch():
 def test_train_config_batch_size_resolution():
     cfg = TrainConfig(batch_size=None)
     assert cfg.resolved_batch_size(torch.device("cpu")) == 64
+
+
+def test_obs_scale_matches_select_and_loss():
+    """Buffer holds raw exponents; select_action and compute_loss must scale once the same way."""
+    device = resolve_device("cpu")
+    agent = DQNAgent(device=device, use_double_dqn=True)
+    obs_scale = 16.0
+    raw = np.full(16, 16.0, dtype=np.float32)
+    expected = agent.scale_obs(raw, obs_scale)
+
+    captured: list[torch.Tensor] = []
+    original_forward = agent.online.forward
+
+    def spy_forward(x: torch.Tensor) -> torch.Tensor:
+        captured.append(x.detach().cpu().clone())
+        return original_forward(x)
+
+    agent.online.forward = spy_forward  # type: ignore[method-assign]
+    mask = np.array([True, True, True, True])
+    agent.select_action(raw.astype(np.int32), mask, epsilon=0.0, obs_scale=obs_scale)
+    select_input = captured[-1].squeeze(0).numpy()
+    np.testing.assert_allclose(select_input, expected, rtol=0.0, atol=0.0)
+
+    buffer = ReplayBuffer(capacity=4)
+    buffer.push(
+        Transition(
+            state=raw.copy(),
+            action=0,
+            reward=1.0,
+            next_state=raw.copy(),
+            terminated=False,
+            truncated=False,
+            valid_mask=mask,
+            next_valid_mask=mask,
+        )
+    )
+    captured.clear()
+    batch = buffer.sample(1, np.random.default_rng(0))
+    agent.compute_loss(batch, obs_scale=obs_scale)
+    loss_input = captured[0].squeeze(0).numpy()
+    np.testing.assert_allclose(loss_input, expected, rtol=0.0, atol=0.0)
+
+
+def test_huber_delta_wired_into_loss():
+    device = resolve_device("cpu")
+    agent = DQNAgent(device=device, huber_delta=2.5)
+    assert agent.loss_fn.beta == 2.5

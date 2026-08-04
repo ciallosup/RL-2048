@@ -41,11 +41,13 @@ class DQNAgent:
         self.gamma = gamma
         self.use_double_dqn = use_double_dqn
         self.grad_clip_norm = grad_clip_norm
+        self.huber_delta = huber_delta
         self.online = QNetwork(obs_dim, hidden_dims).to(device)
         self.target = clone_network(self.online).to(device)
         self.target.eval()
         self.optimizer = torch.optim.Adam(self.online.parameters(), lr=lr)
-        self.loss_fn = nn.SmoothL1Loss(reduction="none")
+        # SmoothL1Loss beta == Huber delta; wire config through (default was always 1.0).
+        self.loss_fn = nn.SmoothL1Loss(reduction="none", beta=huber_delta)
 
     def scale_obs(self, obs: np.ndarray, obs_scale: float) -> np.ndarray:
         return (obs.astype(np.float32) / obs_scale) if obs_scale else obs.astype(np.float32)
@@ -73,10 +75,13 @@ class DQNAgent:
         return int(actions.item()), bool(random_flags.item())
 
     def compute_loss(self, batch: Batch, obs_scale: float = 16.0) -> tuple[torch.Tensor, TrainMetrics]:
-        states = torch.as_tensor(batch.states / obs_scale, dtype=torch.float32, device=self.device)
+        # Expect raw exponent obs in the buffer; scale once here (same as select_action).
+        states = torch.as_tensor(self.scale_obs(batch.states, obs_scale), dtype=torch.float32, device=self.device)
         actions = torch.as_tensor(batch.actions, dtype=torch.long, device=self.device)
         rewards = torch.as_tensor(batch.rewards, dtype=torch.float32, device=self.device)
-        next_states = torch.as_tensor(batch.next_states / obs_scale, dtype=torch.float32, device=self.device)
+        next_states = torch.as_tensor(
+            self.scale_obs(batch.next_states, obs_scale), dtype=torch.float32, device=self.device
+        )
         terminated = torch.as_tensor(batch.terminated, dtype=torch.float32, device=self.device)
         next_masks = torch.as_tensor(batch.next_valid_masks, dtype=torch.bool, device=self.device)
 

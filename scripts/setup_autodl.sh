@@ -21,8 +21,15 @@ fi
 
 "$PYTHON" -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 
+# Must see the image's CUDA torch; plain venv hides system site-packages.
+if [[ -d .venv ]]; then
+  if ! grep -q '^include-system-site-packages = true' .venv/pyvenv.cfg 2>/dev/null; then
+    echo "Recreating .venv with --system-site-packages (needed to reuse image torch)..."
+    rm -rf .venv
+  fi
+fi
 if [[ ! -d .venv ]]; then
-  "$PYTHON" -m venv .venv
+  "$PYTHON" -m venv --system-site-packages .venv
 fi
 # shellcheck disable=SC1091
 source .venv/bin/activate
@@ -31,6 +38,13 @@ python -m pip install -U pip
 # Do not reinstall torch — use the CUDA build from the AutoDL image.
 pip install -e ".[train]" --no-deps
 pip install "gymnasium>=1.0.0" "numpy>=1.26.0" "pyyaml>=6.0" "pytest>=8.0.0"
+
+if ! python -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; then
+  echo "ERROR: torch CUDA not importable inside .venv after install."
+  python -c "import torch; print('torch', getattr(torch, '__version__', '?'), 'cuda', torch.cuda.is_available())" || true
+  exit 1
+fi
+python -c "import torch; print('venv torch', torch.__version__, 'cuda', torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 
 echo ""
 echo "=== Smoke tests ==="
