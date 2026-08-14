@@ -26,6 +26,8 @@ class TrainConfig:
     epsilon_start: float = 1.0
     epsilon_end: float = 0.05
     epsilon_decay_fraction: float = 0.8
+    # If set, overrides fraction-based schedule (absolute env steps to reach epsilon_end).
+    epsilon_decay_steps: int | None = None
     grad_clip_norm: float = 10.0
     use_double_dqn: bool = True
     huber_delta: float = 1.0
@@ -38,6 +40,19 @@ class TrainConfig:
     device: str = "auto"
     num_eval_episodes: int = 200
     eval_seed_set: str = "dev"
+    # Optimization stack
+    obs_encoding: str = "scaled"  # scaled | onehot
+    network_type: str = "mlp"  # mlp | cnn | dueling_cnn
+    onehot_channels: int = 16
+    conv_channels: tuple[int, ...] = (128, 128, 128)
+    symmetry_aug: bool = False
+    n_step: int = 1
+    reward_mode: str = "raw"  # raw | log1p
+    use_per: bool = False
+    per_alpha: float = 0.6
+    per_beta_start: float = 0.4
+    per_beta_frames: int = 1_000_000
+    num_envs: int = 1  # >1 uses multi-process AsyncVectorEnv (multi-core)
 
     def resolved_batch_size(self, device: torch.device) -> int:
         if self.batch_size is not None:
@@ -47,6 +62,7 @@ class TrainConfig:
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["hidden_dims"] = list(self.hidden_dims)
+        data["conv_channels"] = list(self.conv_channels)
         return data
 
     @classmethod
@@ -54,6 +70,10 @@ class TrainConfig:
         payload = dict(data)
         if "hidden_dims" in payload:
             payload["hidden_dims"] = tuple(payload["hidden_dims"])
+        if "conv_channels" in payload:
+            payload["conv_channels"] = tuple(payload["conv_channels"])
+        known = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
+        payload = {k: v for k, v in payload.items() if k in known}
         return cls(**payload)
 
 

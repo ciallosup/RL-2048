@@ -2,7 +2,9 @@
 
 
 
-依据 `2048_DRL_实验路线图.pdf` 实现的 2048 DRL 项目。当前进度：**第 1–5 部分（Masked Double DQN 基线）**。
+依据 `2048_DRL_实验路线图.pdf` 实现的 2048 DRL 项目。
+
+当前最佳：**Phase A Dueling CNN（5M）+ 1-ply expectimax**，val 1000 上均分约 **15820**、**P(2048)≈26%**（贪心 Q 仅 0.27%）。发布权重见 [`checkpoints/`](checkpoints/README.md)，过程说明见 [`docs/updates.md`](docs/updates.md)。
 
 
 
@@ -125,10 +127,16 @@ rl2048-train --config configs/dqn_baseline.yaml
 rl2048-train --config configs/experiments/e1_smoke.yaml --train-seed 0   # 100k 冒烟
 ```
 
-评估 checkpoint（dev/val 固定种子）：
+评估已发布 / 训练得到的 checkpoint（dev/val 固定种子）：
 
 ```powershell
-rl2048-eval --checkpoint results/runs/.../checkpoint_final.pt --episodes 200 --seed-set dev
+rl2048-eval --checkpoint checkpoints/phaseA_dueling_seed0.pt --episodes 200 --seed-set val --max-steps 1200
+```
+
+1-ply expectimax（推荐，用于冲 2048）：
+
+```powershell
+python scripts/eval_expectimax.py --skip-smoke --force-full --seeds 0 --max-steps 1200 --no-stop-on-2048 --expectimax-only
 ```
 
 多 seed 实验（E1/E2）：
@@ -141,8 +149,8 @@ python scripts/run_experiment.py --config configs/experiments/e2_vanilla_dqn.yam
 可视化已训练策略：
 
 ```powershell
-$env:RL2048_CHECKPOINT = "results/runs/.../checkpoint_final.pt"
-rl2048-play   # 策略列表中出现 DQN (checkpoint)
+$env:RL2048_CHECKPOINT = "checkpoints/phaseA_dueling_seed0.pt"
+rl2048-play   # 策略列表中出现 DQN (checkpoint)；界面里是贪心 Q
 ```
 
 **默认超参：** Double DQN、`gamma=0.99`、MLP `[256,256]`、raw merge reward、masked ε-greedy、truncated 仍 bootstrap。`use_double_dqn: false` 切换为 vanilla DQN（E2 对照）。
@@ -230,15 +238,17 @@ POLICY_REGISTRY["rl"] = MyRLPolicy
 ```
 src/rl2048/
   core.py, env.py, symmetry.py
-  policies/     随机 / 启发式 / 贪心 / 固定 / DQN + 注册表
-  rl/           DQN agent、replay、trainer、checkpoint
+  policies/     随机 / 启发式 / 贪心 / 固定 / DQN / expectimax
+  rl/           DQN agent、replay、trainer、search、checkpoint
   eval/         评估 runner、指标、报告
   heuristic/    棋盘启发式特征
   viz/          Tkinter 可视化
-configs/        dqn_baseline.yaml, experiments/e1_*, e2_*
+configs/        dqn_baseline.yaml, experiments/, autodl/opt_*
+checkpoints/    发布的推理权重（optimizer 已剥掉）
 tests/
-scripts/        train_dqn, run_experiment, eval_baselines, setup_env
+scripts/        train_dqn, run_experiment, eval_expectimax, setup_env
 results/        训练 run 与评估 JSON（git 忽略）
+docs/           autodl.md, updates.md, per_notes.md
 data/seeds/     固定评估种子池（git 忽略）
 .venv/ 或 .conda/env/
 ```
@@ -254,9 +264,10 @@ data/seeds/     固定评估种子池（git 忽略）
 
 云专用配置在 `configs/autodl/`（`output_dir` 指向数据盘）。
 
-## 下一步（路线图 E2–E4）
+## 当前进度与下一步
 
-- E2：vanilla vs Double DQN 配对比较
-- E3：γ 扫描；E4：n-step
+已完成：环境与基线、Masked Double DQN、one-hot+CNN/Dueling、n-step、D4 增强、并行环境、Phase A 冲过 P(1024)、**评测期 expectimax 冲过 P(2048)≥1%**。
+
+详见 [docs/updates.md](docs/updates.md)。可选后续：从 Phase A 微调让纯贪心也稳定到 2048；评测时放宽 `max_episode_steps`（强局会撞 1200 截断）。
 
 

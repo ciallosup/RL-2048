@@ -21,11 +21,22 @@ fi
 
 "$PYTHON" -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 
+# --system-site-packages: inherit AutoDL image CUDA torch; do not pip-install torch.
 if [[ ! -d .venv ]]; then
-  "$PYTHON" -m venv .venv
+  "$PYTHON" -m venv --system-site-packages .venv
+elif ! .venv/bin/python -c "import torch" 2>/dev/null; then
+  echo "Existing .venv cannot import torch; recreating with --system-site-packages"
+  rm -rf .venv
+  "$PYTHON" -m venv --system-site-packages .venv
 fi
 # shellcheck disable=SC1091
 source .venv/bin/activate
+
+if ! python -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; then
+  echo "ERROR: venv cannot see CUDA torch from the image."
+  echo "Recreate with: rm -rf .venv && python3 -m venv --system-site-packages .venv"
+  exit 1
+fi
 
 python -m pip install -U pip
 # Do not reinstall torch — use the CUDA build from the AutoDL image.

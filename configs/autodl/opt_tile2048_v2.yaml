@@ -1,0 +1,39 @@
+# Phase B v2: push P(2048). Ablation-informed — PER off, num_envs=8, ε decay fixed at 4M.
+# Gate: P(2048) >= 1% on val 1000 (target); keep P(1024) / mean score from regressing.
+run_name: opt_tile2048_v2
+train_seed: 0
+total_env_steps: 10000000
+max_episode_steps: 1200
+gamma: 0.995
+lr: 0.0001
+batch_size: 256
+replay_capacity: 500000
+learning_starts: 20000
+train_freq: 4
+target_update_freq: 1000
+epsilon_start: 1.0
+epsilon_end: 0.01
+epsilon_decay_fraction: 0.8
+# Match Phase A absolute schedule (not 0.8×10M); see docs/per_notes.md / ablation.
+epsilon_decay_steps: 4000000
+grad_clip_norm: 10.0
+use_double_dqn: true
+huber_delta: 1.0
+obs_scale: 16.0
+obs_encoding: onehot
+network_type: dueling_cnn
+onehot_channels: 16
+conv_channels: [256, 256, 256]
+hidden_dims: [512]
+symmetry_aug: true
+n_step: 5
+reward_mode: log1p
+use_per: false
+log_freq: 10000
+eval_freq: 0
+checkpoint_freq: 1000000
+output_dir: /root/autodl-tmp/RL-2048/results/runs/opt_tile2048_v2
+device: auto
+num_eval_episodes: 1000
+eval_seed_set: val
+num_envs: 8

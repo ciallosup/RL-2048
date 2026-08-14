@@ -48,6 +48,11 @@ def load_checkpoint(path: Path, *, device: torch.device | None = None) -> tuple[
         use_double_dqn=config.use_double_dqn,
         huber_delta=config.huber_delta,
         grad_clip_norm=config.grad_clip_norm,
+        obs_encoding=config.obs_encoding,
+        network_type=config.network_type,
+        onehot_channels=config.onehot_channels,
+        conv_channels=config.conv_channels,
+        symmetry_aug=config.symmetry_aug,
     )
     agent.online.load_state_dict(payload["online_state_dict"])
     agent.target.load_state_dict(payload["target_state_dict"])

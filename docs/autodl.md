@@ -4,7 +4,8 @@
 
 - **镜像**：PyTorch 2.5.1 / Python 3.12 / Ubuntu 22.04 / CUDA 12.4
 - **GPU**：RTX 3060 / 3080 / 4090 任选最便宜单卡即可
-- **项目目录**：`/root/autodl-tmp/RL-2048`（数据盘，实例释放后通常保留）
+- **项目目录**：推荐 `/root/autodl-tmp/RL-2048`（数据盘）；代码也可在 `/root/RL-2048`，但 checkpoint 须写数据盘（见 `configs/autodl/`）
+- **venv**：必须 `python3 -m venv --system-site-packages .venv`，才能继承镜像自带的 CUDA PyTorch
 
 ## 1. 本地：Git 推送
 

@@ -67,7 +67,28 @@ def test_trainer_short_run(tmp_path):
         log_freq=200,
         checkpoint_freq=0,
         output_dir=str(tmp_path),
+        num_envs=1,
     )
     result = Trainer(config).train()
     assert result.env_steps == 500
     assert result.checkpoint_path.exists()
+
+
+@pytest.mark.slow
+def test_trainer_multi_env_short_run(tmp_path):
+    config = TrainConfig(
+        run_name="short_vec",
+        total_env_steps=256,
+        learning_starts=32,
+        train_freq=4,
+        log_freq=128,
+        checkpoint_freq=0,
+        output_dir=str(tmp_path),
+        num_envs=4,
+        device="cpu",
+        max_episode_steps=40,
+    )
+    result = Trainer(config).train()
+    assert result.env_steps == 256
+    assert result.checkpoint_path.exists()
+    assert result.episodes >= 1

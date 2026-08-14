@@ -13,9 +13,16 @@ echo "=== Smoke train (100k steps) ==="
 rl2048-train --config configs/autodl/e1_smoke.yaml --train-seed 0
 
 echo "=== Smoke eval ==="
+# Prefer checkpoint_final.pt; fall back to latest numbered checkpoint.
 LATEST=$(find /root/autodl-tmp/RL-2048/results/runs/e1_smoke -name 'checkpoint_final.pt' | sort | tail -1)
+if [[ -z "$LATEST" ]]; then
+  LATEST=$(find /root/autodl-tmp/RL-2048/results/runs/e1_smoke -name 'checkpoint_*.pt' | sort | tail -1)
+fi
 if [[ -n "$LATEST" ]]; then
+  echo "Evaluating: $LATEST"
   rl2048-eval --checkpoint "$LATEST" --episodes 200 --seed-set dev
+else
+  echo "WARNING: no checkpoint found under e1_smoke; skip eval."
 fi
 
 echo "Smoke test complete."

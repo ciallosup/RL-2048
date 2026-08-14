@@ -49,6 +49,7 @@ def run_episode(
     *,
     seed: int,
     policy_key: str,
+    stop_on_2048: bool = False,
 ) -> EpisodeResult:
     obs, info = env.reset(seed=seed)
     ctx = PolicyContext(env=env, obs=obs, info=info)
@@ -62,6 +63,8 @@ def run_episode(
         obs, _, terminated, truncated, info = env.step(action)
         ctx.obs = obs
         ctx.info = info
+        if stop_on_2048 and info.get("reached_2048"):
+            break
 
     return EpisodeResult(
         seed=seed,
@@ -82,12 +85,19 @@ def evaluate_policy(
     policy_label: str,
     seeds: list[int],
     max_episode_steps: int | None = 500,
+    stop_on_2048: bool = False,
 ) -> PolicyEvalSummary:
     env = Game2048Env(max_episode_steps=max_episode_steps)
     episodes: list[EpisodeResult] = []
     for seed in seeds:
         episodes.append(
-            run_episode(env, policy, seed=seed, policy_key=policy_key)
+            run_episode(
+                env,
+                policy,
+                seed=seed,
+                policy_key=policy_key,
+                stop_on_2048=stop_on_2048,
+            )
         )
 
     scores = [e.game_score for e in episodes]

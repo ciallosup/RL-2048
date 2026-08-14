@@ -65,6 +65,7 @@ def test_dqn_loss_runs():
                 truncated=False,
                 valid_mask=np.array([True, True, True, True]),
                 next_valid_mask=np.array([True, True, True, True]),
+                bootstrap_discount=agent.gamma,
             )
         )
     batch = buffer.sample(8, np.random.default_rng(0))
@@ -87,6 +88,7 @@ def test_truncated_bootstraps_in_target():
             truncated=True,
             valid_mask=np.array([True, True, True, True]),
             next_valid_mask=np.array([True, True, False, False]),
+            bootstrap_discount=agent.gamma,
         )
     )
     batch = buffer.sample(1, np.random.default_rng(0))
@@ -110,6 +112,7 @@ def test_vanilla_vs_double_switch():
                 truncated=False,
                 valid_mask=np.array([True, True, True, True]),
                 next_valid_mask=np.array([True, False, True, True]),
+                bootstrap_discount=0.99,
             )
         )
     batch = buffer.sample(4, np.random.default_rng(1))
@@ -122,3 +125,35 @@ def test_vanilla_vs_double_switch():
 def test_train_config_batch_size_resolution():
     cfg = TrainConfig(batch_size=None)
     assert cfg.resolved_batch_size(torch.device("cpu")) == 64
+
+
+def test_obs_scaled_once_for_action_and_loss():
+    """Replay stores raw exponents; select_action and compute_loss must scale identically."""
+    device = resolve_device("cpu")
+    agent = DQNAgent(device=device, use_double_dqn=True)
+    obs_scale = 16.0
+    raw = np.arange(16, dtype=np.float32)  # exponents 0..15
+    expected = agent.scale_obs(raw, obs_scale)
+
+    # Action path tensor must match scale_obs(raw).
+    action_tensor = agent._obs_to_tensor(raw, obs_scale)
+    np.testing.assert_allclose(action_tensor.cpu().numpy(), expected, rtol=0, atol=0)
+
+    buffer = ReplayBuffer(capacity=4)
+    buffer.push(
+        Transition(
+            state=raw.copy(),
+            action=0,
+            reward=0.0,
+            next_state=raw.copy(),
+            terminated=False,
+            truncated=False,
+            valid_mask=np.array([True, True, True, True]),
+            next_valid_mask=np.array([True, True, True, True]),
+        )
+    )
+    batch = buffer.sample(1, np.random.default_rng(0))
+    loss_states = agent._obs_to_tensor(batch.states, obs_scale)
+    np.testing.assert_allclose(loss_states.cpu().numpy().reshape(-1), expected, rtol=0, atol=0)
+    # Guard against the old double-scale bug (raw / 16 / 16).
+    assert not np.allclose(loss_states.cpu().numpy().reshape(-1), raw / (obs_scale * obs_scale))

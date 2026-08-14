@@ -1,0 +1,33 @@
+# Smoke: same optimization stack, shorter budget for pipeline validation.
+run_name: opt_smoke
+train_seed: 0
+total_env_steps: 500000
+max_episode_steps: 500
+gamma: 0.99
+lr: 0.0001
+batch_size: 256
+replay_capacity: 200000
+learning_starts: 10000
+train_freq: 4
+target_update_freq: 1000
+epsilon_start: 1.0
+epsilon_end: 0.01
+epsilon_decay_fraction: 0.8
+grad_clip_norm: 10.0
+use_double_dqn: true
+huber_delta: 1.0
+obs_scale: 16.0
+obs_encoding: onehot
+network_type: cnn
+onehot_channels: 16
+conv_channels: [128, 128, 128]
+hidden_dims: [256]
+symmetry_aug: true
+n_step: 3
+log_freq: 2000
+eval_freq: 0
+checkpoint_freq: 100000
+output_dir: /root/autodl-tmp/RL-2048/results/runs/opt_smoke
+device: auto
+num_eval_episodes: 200
+eval_seed_set: dev
