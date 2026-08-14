@@ -30,7 +30,7 @@ def evaluate_checkpoint(
         seeds = dev_seeds(episodes)
     else:
         seeds = val_seeds(episodes)
-    policy = DQNPolicy.from_checkpoint(checkpoint_path)
+    policy = DQNPolicy.from_checkpoint(checkpoint_path, decode="greedy")
     summary = evaluate_policy(
         policy,
         policy_key="dqn",

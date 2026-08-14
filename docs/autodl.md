@@ -1,5 +1,7 @@
 # AutoDL 云 GPU 训练指南
 
+云上租卡训练的流程（镜像、tmux、数据盘路径、结果回传）。日常安装与评测见仓库 [README](../README.md)。
+
 ## 实例选型
 
 - **镜像**：PyTorch 2.5.1 / Python 3.12 / Ubuntu 22.04 / CUDA 12.4

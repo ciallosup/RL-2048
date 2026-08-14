@@ -55,7 +55,17 @@ def main() -> None:
         default=None,
         help="Evaluate a DQN checkpoint (adds to policy list).",
     )
+    parser.add_argument(
+        "--decode",
+        choices=("greedy", "1ply", "2ply"),
+        default="2ply",
+        help="RL inference: greedy Q, 1-ply, or 2-ply expectimax (default: 2ply).",
+    )
     args = parser.parse_args()
+
+    max_steps = args.max_steps
+    if args.checkpoint is not None and args.decode != "greedy" and args.max_steps == 500:
+        max_steps = 4000
 
     if args.seed_set == "dev":
         seeds = dev_seeds(args.episodes)
@@ -73,21 +83,21 @@ def main() -> None:
             policy_key=cls.key,
             policy_label=cls.label,
             seeds=seeds,
-            max_episode_steps=args.max_steps,
+            max_episode_steps=max_steps,
         )
         summaries.append(summary)
 
     if args.checkpoint:
-        from rl2048.policies.dqn_policy import DQNPolicy
+        from rl2048.policies.dqn_policy import DECODE_LABELS, DQNPolicy
 
-        dqn = DQNPolicy.from_checkpoint(args.checkpoint)
+        dqn = DQNPolicy.from_checkpoint(args.checkpoint, decode=args.decode)
         summaries.append(
             evaluate_policy(
                 dqn,
-                policy_key="dqn",
-                policy_label=f"DQN ({args.checkpoint.name})",
+                policy_key=f"dqn_{args.decode}",
+                policy_label=f"{DECODE_LABELS[args.decode]} ({args.checkpoint.name})",
                 seeds=seeds,
-                max_episode_steps=args.max_steps,
+                max_episode_steps=max_steps,
             )
         )
 
@@ -112,7 +122,8 @@ def main() -> None:
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "episodes": len(seeds),
         "seed_set": args.seed_set,
-        "max_episode_steps": args.max_steps,
+        "max_episode_steps": max_steps,
+        "decode": args.decode if args.checkpoint else None,
         "seeds_file": str(Path("data/seeds") / f"{args.seed_set}_{args.episodes}.json"),
         "policies": [summary_to_dict(s) for s in summaries],
         "e0_gate": gate,

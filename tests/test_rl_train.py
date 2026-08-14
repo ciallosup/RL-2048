@@ -48,13 +48,19 @@ def test_dqn_policy_greedy_action(tmp_path):
     agent = DQNAgent(device=device)
     ckpt = tmp_path / "checkpoint.pt"
     save_checkpoint(ckpt, agent=agent, config=config, env_steps=1, episode_idx=0)
-    policy = DQNPolicy.from_checkpoint(ckpt)
+    policy = DQNPolicy.from_checkpoint(ckpt, decode="greedy")
     env = Game2048Env()
     obs, info = env.reset(seed=0)
     ctx = PolicyContext(env=env, obs=obs, info=info)
     action = policy.select_action(ctx)
     assert 0 <= action < 4
     assert info["valid_action_mask"][action]
+    policy.set_decode("2ply")
+    assert policy.decode == "2ply"
+    action2 = policy.select_action(ctx)
+    assert info["valid_action_mask"][action2]
+    policy.set_decode("1ply")
+    assert policy.decode == "1ply"
 
 
 @pytest.mark.slow

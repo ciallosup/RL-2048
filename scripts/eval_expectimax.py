@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""C0: greedy DQN vs 1-ply expectimax on Phase A checkpoints.
+"""C0/C0b: greedy DQN vs expectimax on Phase A checkpoints.
 
 Smoke (200 val seeds) first; if search helps, continue to val 1000.
-Supports resume: --expectimax-only --seeds 2 --max-steps 1200
+Supports resume: --expectimax-only --seeds 2 --max-steps 4000
+Default search is 2-ply + corner tiebreak.
 """
 from __future__ import annotations
 
@@ -166,7 +167,7 @@ def promising(greedy: dict, search: dict) -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Greedy vs 1-ply expectimax eval.")
+    parser = argparse.ArgumentParser(description="Greedy vs expectimax eval.")
     parser.add_argument("--smoke-episodes", type=int, default=200)
     parser.add_argument("--full-episodes", type=int, default=1000)
     parser.add_argument("--skip-smoke", action="store_true")
@@ -176,6 +177,10 @@ def main() -> None:
     parser.add_argument("--stop-on-2048", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--expectimax-only", action="store_true")
     parser.add_argument("--progress-every", type=int, default=25)
+    parser.add_argument("--depth", type=int, default=2, help="Max expectimax depth (1 or 2).")
+    parser.add_argument("--adaptive-depth", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--corner-tiebreak", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--corner-margin", type=float, default=2.0)
     args = parser.parse_args()
 
     ckpts = latest_phase_a_ckpts()
@@ -188,18 +193,36 @@ def main() -> None:
     for seed, path in ckpts:
         print(f"  seed{seed}: {path}", flush=True)
     print(
-        f"max_steps={args.max_steps} stop_on_2048={args.stop_on_2048} expectimax_only={args.expectimax_only}",
+        f"max_steps={args.max_steps} stop_on_2048={args.stop_on_2048} "
+        f"expectimax_only={args.expectimax_only} depth={args.depth} "
+        f"adaptive={args.adaptive_depth} corner={args.corner_tiebreak}",
         flush=True,
     )
+
+    def make_expectimax(ckpt):
+        return ExpectimaxDQNPolicy.from_checkpoint(
+            ckpt,
+            depth=args.depth,
+            adaptive=args.adaptive_depth,
+            corner_tiebreak=args.corner_tiebreak,
+            corner_margin=args.corner_margin,
+        )
 
     smoke_seeds = val_seeds(args.smoke_episodes)
     full_seeds = val_seeds(args.full_episodes)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    out = OUT_DIR / "expectimax_phaseA.json"
+    out = OUT_DIR / (
+        f"expectimax_d{args.depth}_a{int(args.adaptive_depth)}"
+        f"_c{int(args.corner_tiebreak)}.json"
+    )
     payload: dict = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "max_episode_steps": args.max_steps,
         "stop_on_2048": args.stop_on_2048,
+        "depth": args.depth,
+        "adaptive_depth": args.adaptive_depth,
+        "corner_tiebreak": args.corner_tiebreak,
+        "corner_margin": args.corner_margin,
         "smoke": [],
         "full": [],
     }
@@ -234,10 +257,10 @@ def main() -> None:
             print(f"\n-- Phase A seed {seed} --", flush=True)
             greedy = None
             if not args.expectimax_only:
-                greedy = _eval(DQNPolicy.from_checkpoint(ckpt), f"greedy seed{seed}", smoke_seeds, "dqn")
+                greedy = _eval(DQNPolicy.from_checkpoint(ckpt, decode="greedy"), f"greedy seed{seed}", smoke_seeds, "dqn")
                 _print_row("greedy", greedy)
             search = _eval(
-                ExpectimaxDQNPolicy.from_checkpoint(ckpt),
+                make_expectimax(ckpt),
                 f"expectimax seed{seed}",
                 smoke_seeds,
                 "dqn_expectimax",
@@ -266,14 +289,14 @@ def main() -> None:
             print(f"\n-- Phase A seed {seed} --", flush=True)
             greedy = None
             if not args.expectimax_only:
-                greedy = _eval(DQNPolicy.from_checkpoint(ckpt), f"greedy seed{seed}", full_seeds, "dqn")
+                greedy = _eval(DQNPolicy.from_checkpoint(ckpt, decode="greedy"), f"greedy seed{seed}", full_seeds, "dqn")
                 _print_row("greedy", greedy)
             search = _eval(
-                ExpectimaxDQNPolicy.from_checkpoint(ckpt),
+                make_expectimax(ckpt),
                 f"expectimax seed{seed}",
                 full_seeds,
                 "dqn_expectimax",
-                partial_name=f"expectimax_seed{seed}_partial.json",
+                partial_name=f"expectimax_d{args.depth}_a{int(args.adaptive_depth)}_c{int(args.corner_tiebreak)}_seed{seed}_partial.json",
             )
             _print_row("expectimax", search)
             row = {

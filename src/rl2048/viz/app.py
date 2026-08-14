@@ -9,7 +9,13 @@ from tkinter import filedialog, font as tkfont, ttk
 from rl2048.core import ACTION_DOWN, ACTION_LEFT, ACTION_RIGHT, ACTION_UP, ACTION_NAMES
 from rl2048.env import Game2048Env
 from rl2048.policies.base import Policy, PolicyContext
-from rl2048.policies.dqn_policy import DQNPolicy
+from rl2048.policies.dqn_policy import (
+    DECODE_1PLY,
+    DECODE_2PLY,
+    DECODE_GREEDY,
+    DECODE_LABELS,
+    DQNPolicy,
+)
 from rl2048.policies.manual import ManualPolicy
 from rl2048.policies.registry import get_policy, list_policies
 from rl2048.rl.checkpoint_catalog import discover_checkpoints
@@ -25,10 +31,11 @@ class VisualizerApp:
         self.root.configure(bg=_hex(colors.BG_COLOR))
         self.root.minsize(860, 680)
 
-        self.env = Game2048Env(max_episode_steps=500)
+        self.env = Game2048Env(max_episode_steps=4000)
         self.ctx = PolicyContext(env=self.env)
         self.selected_policy_key = tk.StringVar(value="random")
         self.checkpoint_var = tk.StringVar(value="")
+        self.rl_decode_var = tk.StringVar(value=DECODE_2PLY)
         self.policy: Policy = get_policy("random")
         self.checkpoint_path: str | None = None
         self.checkpoint_meta: dict | None = None
@@ -156,7 +163,32 @@ class VisualizerApp:
             fg=_hex(colors.ACCENT),
             wraplength=320,
             justify=tk.LEFT,
-        ).pack(anchor=tk.W, padx=8, pady=(0, 8))
+        ).pack(anchor=tk.W, padx=8, pady=(0, 4))
+
+        tk.Label(
+            rl_frame,
+            text="RL 推理方式（加载模型后可切换）",
+            font=self.label_font,
+            bg=_hex(colors.BG_COLOR),
+            fg=_hex(colors.TEXT_DARK),
+        ).pack(anchor=tk.W, padx=8, pady=(4, 0))
+        decode_row = tk.Frame(rl_frame, bg=_hex(colors.BG_COLOR))
+        decode_row.pack(fill=tk.X, padx=8, pady=(2, 8))
+        self._decode_buttons: list[ttk.Radiobutton] = []
+        for mode, text in (
+            (DECODE_GREEDY, "贪心 Q"),
+            (DECODE_1PLY, "1-ply"),
+            (DECODE_2PLY, "2-ply（默认）"),
+        ):
+            btn = ttk.Radiobutton(
+                decode_row,
+                text=text,
+                value=mode,
+                variable=self.rl_decode_var,
+                command=self._on_rl_decode_change,
+            )
+            btn.pack(side=tk.LEFT, padx=(0, 10))
+            self._decode_buttons.append(btn)
 
         btn_row1 = tk.Frame(side, bg=_hex(colors.BG_COLOR))
         btn_row1.pack(fill=tk.X, pady=(8, 4))
@@ -226,7 +258,7 @@ class VisualizerApp:
     def _load_checkpoint(self, path: str) -> None:
         ckpt_path = str(Path(path).resolve())
         self.checkpoint_path = ckpt_path
-        self.policy = DQNPolicy.from_checkpoint(ckpt_path)
+        self.policy = DQNPolicy.from_checkpoint(ckpt_path, decode=self.rl_decode_var.get())
         meta = next((item for item in self._checkpoints if item["path"] == ckpt_path), None)
         if meta is None:
             meta = next((item for item in discover_checkpoints(limit=200) if item["path"] == ckpt_path), {})
@@ -245,6 +277,16 @@ class VisualizerApp:
             f"已加载: {Path(ckpt_path).name}\n训练 seed={seed}, 步数={steps}, run={run}"
         )
         self.reset_game()
+
+    def _on_rl_decode_change(self) -> None:
+        if self.checkpoint_path is None:
+            return
+        decode = self.rl_decode_var.get()
+        if isinstance(self.policy, DQNPolicy):
+            self.policy.set_decode(decode)
+        else:
+            self.policy = DQNPolicy.from_checkpoint(self.checkpoint_path, decode=decode)
+        self._refresh_status()
 
     def _clear_checkpoint(self) -> None:
         self.checkpoint_path = None
@@ -353,7 +395,9 @@ class VisualizerApp:
 
     def _active_policy_label(self) -> str:
         if self.checkpoint_path:
-            return f"RL: {Path(self.checkpoint_path).name}"
+            decode = self.rl_decode_var.get()
+            mode = DECODE_LABELS.get(decode, decode)
+            return f"{mode} · {Path(self.checkpoint_path).name}"
         return self.selected_policy_key.get()
 
     def _refresh_status(self) -> None:

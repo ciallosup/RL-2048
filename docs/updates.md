@@ -10,28 +10,39 @@
 - 回报：`n_step=5`，`gamma=0.995`，训练奖励 `log1p`（评估仍用原始分数）
 - 采集：`num_envs` 可走 `AsyncVectorEnv`（`SAME_STEP` + `final_obs`）
 - 可选 PER：实现了，但 **与 D4 增强冲突，默认关闭**（见 [per_notes.md](per_notes.md)）
-- 评测：除贪心 Q 外，支持 **1-ply expectimax**（对 spawn 求期望 V）
+- 评测：除贪心 Q 外，支持 **1-ply / 2-ply expectimax**（对 spawn 求期望 V；2-ply 默认开角落破同分）
 
-## 主结果（val 1000，`max_episode_steps=1200`）
+## 主结果
 
-| 设定 | 均分 | P(1024) | P(2048) |
-|---|---:|---:|---:|
-| 随机 | 1097 | 0% | 0% |
-| 启发式 | ~3850 | 1.8% | 0% |
-| E1 MLP Double DQN | 2578 | — | — |
-| one-hot+CNN 2M | 5040 | 0.6% | 0% |
-| **Phase A Dueling 5M×3（贪心）** | **6123** | **16.9%** | **0.27%** |
-| 同上 + **1-ply expectimax** | **~15820** | **82.6%** | **26.4%** |
+| 设定 | 均分 | P(1024) | P(2048) | 协议 |
+|---|---:|---:|---:|---|
+| 随机 | 1097 | 0% | 0% | val 1000 |
+| 启发式 | ~3850 | 1.8% | 0% | val 1000 |
+| E1 MLP Double DQN | 2578 | — | — | val 1000 |
+| one-hot+CNN 2M | 5040 | 0.6% | 0% | val 1000 |
+| **Phase A Dueling 5M×3（贪心）** | **6123** | **16.9%** | **0.27%** | val 1000，max_steps=1200 |
+| 同上 + **1-ply expectimax** | **~15820** | **82.6%** | **26.4%** | val 1000，max_steps=1200，play-out |
+| Phase A seed0 + 1-ply | 15658 | 83.8% | **30.0%** | val 前 80，max_steps=4000，stop@2048 |
+| 同上 + **2-ply + 角落破同分** | 21098 | 100% | 96.2% | 同上 |
+| **Phase A seed0 + 2-ply + 角落破同分** | **20754** | **99.5%** | **93.5%** | **val 200**，max_steps=4000，stop@2048 |
 
 Phase A 配置：`configs/autodl/opt_tile1024.yaml`。发布权重：`checkpoints/phaseA_dueling_seed0.pt`。
 
-Expectimax 按种子：seed0 **32.2%** / seed1 **31.6%** / seed2 **15.5%** 到达 2048。约 11–31% 的强局会撞上 1200 步截断，因此 P(2048) 仍是下限。
+1-ply 按种子（val 1000，max_steps=1200，play-out）：seed0 **32.2%** / seed1 **31.6%** / seed2 **15.5%**。约 11–31% 的强局会撞上 1200 步截断，因此该列的分数 / P(4096) 是下限；对 P(2048) 本身影响不大（多数截断局已经有 2048）。
+
+2-ply 主数字来自 **val 200**（187/200，Wilson 95% CI：**89.2–96.2%**）。前 80 局对照里 2-ply 为 96.2%、1-ply 为 30.0%。均分是「第一次摸到 2048 或死亡」时的分数，不能直接和 play-out 的 15820 比。
+
+## 2-ply 为什么涨这么多
+
+贪心 Q 的动作分差只有约 2–4（绝对值 ~350），1-ply 几乎是在噪声里选。2-ply 多看一层「spawn 之后自己的应手」，能避开把 1024 残局走死的步。角落破同分：分差 ≤2 时优先把最大块留在角落——网络用了 D4 增强，本身不绑定某个角落，这一步补上「承诺」。
+
+搜 2-ply 时用行 LUT 走子 + 批量合法掩码，seed0 大约 19 秒/局（RTX 4080）。
 
 ## 实验上走过的弯路
 
 1. **PER + `num_envs=8` + 把 ε 衰减拉到 8M**（旧 Phase B）把模型训崩（均分 ~3859）。消融见下。
 2. **再从零训 10M**（Phase B v2：关 PER、n=8、ε 仍 4M）终局弱于 Phase A 5M，4–6M 峰值也冲不过 P(2048)≥1%。
-3. 真正缺口是 **1024 之后的残局**，不是步数预算。贪心 Q 是 0 步视野；1-ply 搜索把转化率从 ~1.6% 拉到足以过 1% 门槛。
+3. 真正缺口是 **1024 之后的残局**，不是步数预算。贪心 Q 是 0 步视野；1-ply 把 P(2048) 从 0.27% 拉到 ~30%；**2-ply + 角落破同分** 再把转化率拉到 val 200 上的 **93.5%**。
 
 ## 消融：`num_envs` × PER（5M×1）
 
@@ -50,7 +61,11 @@ bash scripts/run_tile_opt.sh phaseA
 
 # 贪心 vs expectimax
 python scripts/eval_expectimax.py --skip-smoke --force-full --seeds 0 \
-  --max-steps 1200 --no-stop-on-2048
+  --max-steps 4000 --stop-on-2048
+
+# 复现 1-ply
+python scripts/eval_expectimax.py --skip-smoke --force-full --seeds 0 \
+  --max-steps 4000 --stop-on-2048 --depth 1 --no-corner-tiebreak
 ```
 
-可视化：`RL2048_CHECKPOINT=checkpoints/phaseA_dueling_seed0.pt rl2048-play`（下拉中的 DQN 为贪心；expectimax 目前走评估脚本）。
+可视化：`rl2048-play`，加载 checkpoint 后默认 **2-ply**，可切换贪心 Q / 1-ply / 2-ply。
