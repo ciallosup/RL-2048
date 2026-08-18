@@ -57,9 +57,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--decode",
-        choices=("greedy", "1ply", "2ply"),
+        choices=("greedy", "1ply", "2ply", "3ply"),
         default="2ply",
-        help="RL inference: greedy Q, 1-ply, or 2-ply expectimax (default: 2ply).",
+        help="RL inference: greedy Q, 1-ply, 2-ply, or adaptive 3-ply (default: 2ply).",
     )
     args = parser.parse_args()
 

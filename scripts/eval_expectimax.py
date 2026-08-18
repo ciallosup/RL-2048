@@ -50,6 +50,7 @@ def _print_row(label: str, summary: dict) -> None:
         f"P512={100 * _tile_p(summary, 'P(>=512)'):5.1f}% "
         f"P1024={100 * summary['p_reach_1024']:5.2f}% "
         f"P2048={100 * summary['p_reach_2048']:5.2f}% "
+        f"P4096={100 * _tile_p(summary, 'P(>=4096)'):5.2f}% "
         f"trunc={100 * summary['truncation_rate']:4.1f}%",
         flush=True,
     )
@@ -130,10 +131,12 @@ def eval_policy(
         if n % progress_every == 0 or i == len(remaining):
             n2048 = sum(e.reached_2048 for e in episodes)
             n1024 = sum(e.max_tile >= 1024 for e in episodes)
+            n4096 = sum(e.max_tile >= 4096 for e in episodes)
             mean = float(np.mean([e.game_score for e in episodes]))
             print(
                 f"  {label} {n}/{len(seeds)} mean={mean:.1f} "
-                f"P1024={100 * n1024 / n:.2f}% P2048={100 * n2048 / n:.2f}%",
+                f"P1024={100 * n1024 / n:.2f}% P2048={100 * n2048 / n:.2f}% "
+                f"P4096={100 * n4096 / n:.2f}%",
                 flush=True,
             )
             if partial_path is not None:
@@ -177,18 +180,27 @@ def main() -> None:
     parser.add_argument("--stop-on-2048", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--expectimax-only", action="store_true")
     parser.add_argument("--progress-every", type=int, default=25)
-    parser.add_argument("--depth", type=int, default=2, help="Max expectimax depth (1 or 2).")
+    parser.add_argument("--depth", type=int, default=2, help="Max expectimax depth (1, 2, or 3).")
+    parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        default=None,
+        help="Evaluate this checkpoint instead of scanning Phase A run dirs.",
+    )
     parser.add_argument("--adaptive-depth", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--corner-tiebreak", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--corner-margin", type=float, default=2.0)
     args = parser.parse_args()
 
-    ckpts = latest_phase_a_ckpts()
-    if not ckpts:
-        raise SystemExit(f"No Phase A checkpoints under {PHASE_A_ROOT}")
-    if args.seeds != "all":
-        want = {int(x) for x in args.seeds.split(",")}
-        ckpts = [(s, p) for s, p in ckpts if s in want]
+    if args.checkpoint is not None:
+        ckpts = [(0, args.checkpoint)]
+    else:
+        ckpts = latest_phase_a_ckpts()
+        if not ckpts:
+            raise SystemExit(f"No Phase A checkpoints under {PHASE_A_ROOT}")
+        if args.seeds != "all":
+            want = {int(x) for x in args.seeds.split(",")}
+            ckpts = [(s, p) for s, p in ckpts if s in want]
     print("Checkpoints:", flush=True)
     for seed, path in ckpts:
         print(f"  seed{seed}: {path}", flush=True)
@@ -211,9 +223,10 @@ def main() -> None:
     smoke_seeds = val_seeds(args.smoke_episodes)
     full_seeds = val_seeds(args.full_episodes)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    stop_tag = "stop2048" if args.stop_on_2048 else "playout"
     out = OUT_DIR / (
         f"expectimax_d{args.depth}_a{int(args.adaptive_depth)}"
-        f"_c{int(args.corner_tiebreak)}.json"
+        f"_c{int(args.corner_tiebreak)}_{stop_tag}_s{args.max_steps}.json"
     )
     payload: dict = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -296,7 +309,7 @@ def main() -> None:
                 f"expectimax seed{seed}",
                 full_seeds,
                 "dqn_expectimax",
-                partial_name=f"expectimax_d{args.depth}_a{int(args.adaptive_depth)}_c{int(args.corner_tiebreak)}_seed{seed}_partial.json",
+                partial_name=f"expectimax_d{args.depth}_a{int(args.adaptive_depth)}_c{int(args.corner_tiebreak)}_{stop_tag}_s{args.max_steps}_seed{seed}_partial.json",
             )
             _print_row("expectimax", search)
             row = {

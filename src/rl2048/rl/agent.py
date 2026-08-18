@@ -161,6 +161,8 @@ class DQNAgent:
         obs_scale: float = 16.0,
         *,
         rng: np.random.Generator | None = None,
+        td_coef: float = 1.0,
+        bc_coef: float = 0.0,
     ) -> tuple[torch.Tensor, TrainMetrics]:
         if self.symmetry_aug:
             if rng is None:
@@ -199,9 +201,17 @@ class DQNAgent:
         td_error = (q_sa - targets).detach()
         if batch.weights is not None:
             weights = torch.as_tensor(batch.weights, dtype=torch.float32, device=self.device)
-            loss = (per_sample_loss * weights).mean()
+            td_loss = (per_sample_loss * weights).mean()
         else:
-            loss = per_sample_loss.mean()
+            td_loss = per_sample_loss.mean()
+
+        loss = float(td_coef) * td_loss
+        if float(bc_coef) > 0.0:
+            valid_masks = torch.as_tensor(batch.valid_masks, dtype=torch.bool, device=self.device)
+            neg_inf = torch.finfo(q_values.dtype).min
+            logits = q_values.masked_fill(~valid_masks, neg_inf)
+            bc_loss = torch.nn.functional.cross_entropy(logits, actions)
+            loss = loss + float(bc_coef) * bc_loss
 
         self.optimizer.zero_grad(set_to_none=True)
         loss.backward()

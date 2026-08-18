@@ -163,6 +163,53 @@ def test_adaptive_depth_only_in_endgame():
     assert resolve_search_depth(late, depth=2, adaptive=False) == 2
     assert resolve_search_depth(early, depth=2, adaptive=False) == 2
 
+    open_2048 = np.zeros((4, 4), dtype=np.int32)
+    open_2048[0, 0] = 2048
+    assert resolve_search_depth(open_2048, depth=3, adaptive=False) == 2
+
+    cramped_2048 = np.array(
+        [
+            [2048, 1024, 512, 256],
+            [4, 8, 16, 32],
+            [8, 16, 32, 64],
+            [16, 32, 0, 0],
+        ],
+        dtype=np.int32,
+    )
+    assert resolve_search_depth(cramped_2048, depth=3, adaptive=False) == 3
+
+    cramped_1024 = np.array(
+        [
+            [1024, 512, 256, 128],
+            [2, 4, 8, 16],
+            [4, 8, 16, 32],
+            [8, 16, 32, 0],
+        ],
+        dtype=np.int32,
+    )
+    assert resolve_search_depth(cramped_1024, depth=3, adaptive=False) == 3
+    loose_1024 = np.array(
+        [
+            [1024, 512, 256, 128],
+            [2, 4, 8, 16],
+            [4, 8, 0, 0],
+            [0, 0, 0, 0],
+        ],
+        dtype=np.int32,
+    )
+    assert resolve_search_depth(loose_1024, depth=3, adaptive=False) == 2
+    wide_2048 = np.array(
+        [
+            [2048, 1024, 512, 256],
+            [4, 8, 16, 32],
+            [8, 16, 0, 0],
+            [0, 0, 0, 0],
+        ],
+        dtype=np.int32,
+    )
+    assert int(np.count_nonzero(wide_2048 == 0)) == 6
+    assert resolve_search_depth(wide_2048, depth=3, adaptive=False) == 2
+
 
 def test_depth2_prefers_reply_that_1ply_misses():
     board = np.array(
@@ -240,3 +287,65 @@ def test_corner_tiebreak_keeps_max_tile():
     assert changed
     assert 1024 in (after[0, 0], after[0, 3], after[3, 0], after[3, 3])
     assert action != ACTION_RIGHT
+
+
+def test_general_depth2_matches_specialized():
+    from rl2048.rl.search import _expectimax_depth2, _expectimax_general
+
+    def q_batch_fn(obs_batch: np.ndarray) -> np.ndarray:
+        q = np.zeros((obs_batch.shape[0], 4), dtype=np.float32)
+        q[:, 0] = obs_batch[:, 0]
+        q[:, 1] = obs_batch[:, 1] * 0.5
+        q[:, 2] = obs_batch.max(axis=1)
+        q[:, 3] = obs_batch[:, -1]
+        return q
+
+    rng = np.random.default_rng(3)
+    kwargs = dict(gamma=0.995, reward_mode="log1p", include_reward=True)
+    for _ in range(6):
+        exponents = rng.integers(0, 8, size=(4, 4), dtype=np.int32)
+        board = np.where(exponents == 0, 0, np.left_shift(1, exponents)).astype(np.int32)
+        v2 = _expectimax_depth2(board, q_batch_fn, **kwargs)
+        vg = _expectimax_general(board, q_batch_fn, depth=2, **kwargs)
+        np.testing.assert_allclose(v2, vg, rtol=1e-4, atol=1e-4)
+
+
+def test_depth3_runs_and_open_board_stays_at_2ply():
+    open_board = np.array(
+        [
+            [2, 2, 0, 0],
+            [0, 0, 0, 0],
+            [0, 0, 0, 0],
+            [0, 0, 0, 0],
+        ],
+        dtype=np.int32,
+    )
+
+    def q_batch_fn(obs_batch: np.ndarray) -> np.ndarray:
+        return np.ones((obs_batch.shape[0], 4), dtype=np.float32)
+
+    kwargs = dict(gamma=1.0, reward_mode="raw", include_reward=False)
+    v_req3 = expectimax_action_values(open_board, q_batch_fn, depth=3, **kwargs)
+    v2 = expectimax_action_values(open_board, q_batch_fn, depth=2, **kwargs)
+    np.testing.assert_allclose(v_req3, v2)
+
+    cramped = np.array(
+        [
+            [1024, 512, 256, 128],
+            [2, 4, 8, 16],
+            [4, 8, 16, 32],
+            [8, 16, 32, 0],
+        ],
+        dtype=np.int32,
+    )
+    assert resolve_search_depth(cramped, depth=3, adaptive=False) == 3
+    v3 = expectimax_action_values(cramped, q_batch_fn, depth=3, **kwargs)
+    assert int(np.isfinite(v3).sum()) >= 1
+    action = expectimax_select_action(
+        cramped,
+        q_batch_fn,
+        depth=3,
+        corner_tiebreak=True,
+        **kwargs,
+    )
+    assert 0 <= action < 4

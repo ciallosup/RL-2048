@@ -1,0 +1,48 @@
+# C1b: frozen Phase A teacher for 2-ply collection + BC.
+# C1 let the online net be the search leaf; Q drift collapsed P(4096).
+# Here search always uses Phase A. Student imitates those actions with a
+# small TD term and a frozen target (Phase A values).
+run_name: c1b_frozen_teacher
+init_checkpoint: /root/RL-2048/checkpoints/phaseA_dueling_seed0.pt
+train_seed: 0
+total_env_steps: 400000
+max_episode_steps: 5000
+gamma: 0.995
+lr: 0.00001
+batch_size: 256
+replay_capacity: 400000
+learning_starts: 8000
+train_freq: 4
+target_update_freq: 1000
+epsilon_start: 0.02
+epsilon_end: 0.01
+epsilon_decay_fraction: 0.5
+grad_clip_norm: 10.0
+use_double_dqn: true
+huber_delta: 1.0
+obs_scale: 16.0
+obs_encoding: onehot
+network_type: dueling_cnn
+onehot_channels: 16
+conv_channels: [256, 256, 256]
+hidden_dims: [512]
+symmetry_aug: true
+n_step: 5
+reward_mode: log1p
+use_per: false
+collect_decode: 2ply
+collect_corner_tiebreak: true
+collect_endgame_epsilon: 0.01
+collect_endgame_tile: 1024
+collect_frozen_teacher: true
+bc_coef: 1.0
+td_coef: 0.3
+freeze_target: true
+log_freq: 5000
+eval_freq: 0
+checkpoint_freq: 100000
+output_dir: /root/autodl-tmp/RL-2048/results/runs/c1b_frozen_teacher
+device: auto
+num_eval_episodes: 200
+eval_seed_set: val
+num_envs: 1

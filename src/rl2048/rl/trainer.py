@@ -68,6 +68,29 @@ class Trainer:
             conv_channels=config.conv_channels,
             symmetry_aug=config.symmetry_aug,
         )
+        if config.init_checkpoint:
+            from rl2048.rl.checkpoint import load_checkpoint
+
+            init_path = Path(config.init_checkpoint)
+            if not init_path.is_file():
+                raise FileNotFoundError(f"init_checkpoint not found: {init_path}")
+            loaded, _, meta = load_checkpoint(init_path, device=self.device)
+            self.agent.online.load_state_dict(loaded.online.state_dict())
+            self.agent.target.load_state_dict(loaded.target.state_dict())
+            print(
+                f"Loaded init weights from {init_path} "
+                f"(env_steps={meta.get('env_steps', '?')}; optimizer not restored)",
+                flush=True,
+            )
+            if config.collect_frozen_teacher:
+                loaded.eval_mode()
+                self.teacher_agent = loaded
+            else:
+                self.teacher_agent = None
+        else:
+            if config.collect_frozen_teacher:
+                raise ValueError("collect_frozen_teacher requires init_checkpoint")
+            self.teacher_agent = None
         if config.use_per:
             self.buffer: ReplayBuffer = PrioritizedReplayBuffer(
                 config.replay_capacity,
@@ -86,6 +109,8 @@ class Trainer:
             f"num_envs={self.num_envs}, encoding={config.obs_encoding}, net={config.network_type}, "
             f"n_step={config.n_step}, symmetry_aug={config.symmetry_aug}, "
             f"reward={config.reward_mode}, per={config.use_per}, "
+            f"collect={config.collect_decode} frozen_teacher={config.collect_frozen_teacher} "
+            f"bc={config.bc_coef} td={config.td_coef} freeze_target={config.freeze_target}, "
             f"max_steps={config.max_episode_steps}, run_dir={self.run_dir}",
             flush=True,
         )
@@ -99,6 +124,63 @@ class Trainer:
 
     def _episode_reset_seed(self, env_i: int = 0) -> int:
         return int(self.config.train_seed * 10_000 + self.episode_idx * self.num_envs + env_i)
+
+    def _current_boards(self) -> list[np.ndarray]:
+        if hasattr(self.envs, "get_attr"):
+            boards = self.envs.get_attr("board")
+            return [np.asarray(b, dtype=np.int32).reshape(4, 4) for b in boards]
+        raise RuntimeError("Vector env cannot expose boards for search collection.")
+
+    def _select_rollout_actions(
+        self,
+        obs: np.ndarray,
+        masks: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        decode = str(self.config.collect_decode).strip().lower().replace("-", "").replace("_", "")
+        if decode in ("", "greedy", "q", "0"):
+            return self.agent.select_actions(
+                obs,
+                masks,
+                self.epsilon,
+                obs_scale=self.config.obs_scale,
+                generator=self.torch_generator,
+            )
+
+        from rl2048.policies.dqn_policy import DECODE_DEPTH, normalize_decode
+        from rl2048.rl.search import expectimax_select_action
+
+        mode = normalize_decode(decode)
+        depth = DECODE_DEPTH[mode]
+        boards = self._current_boards()
+
+        def q_batch_fn(obs_batch):
+            leaf = self.teacher_agent if self.teacher_agent is not None else self.agent
+            return leaf.q_values_batch(obs_batch, obs_scale=self.config.obs_scale)
+
+        actions = np.empty(self.num_envs, dtype=np.int64)
+        random_flags = np.zeros(self.num_envs, dtype=np.bool_)
+        endgame_tile = int(self.config.collect_endgame_tile)
+        endgame_eps = float(self.config.collect_endgame_epsilon)
+        for i in range(self.num_envs):
+            eps = float(self.epsilon)
+            if int(np.asarray(boards[i]).max()) >= endgame_tile:
+                eps = min(eps, endgame_eps)
+            if self.rng.random() < eps:
+                legal = np.flatnonzero(masks[i])
+                actions[i] = int(self.rng.choice(legal))
+                random_flags[i] = True
+                continue
+            actions[i] = expectimax_select_action(
+                boards[i],
+                q_batch_fn,
+                gamma=self.config.gamma,
+                reward_mode=self.config.reward_mode,
+                include_reward=True,
+                depth=depth,
+                adaptive=False,
+                corner_tiebreak=bool(self.config.collect_corner_tiebreak),
+            )
+        return actions, random_flags
 
     def _current_epsilon(self) -> float:
         if self.config.epsilon_decay_steps is not None:
@@ -129,6 +211,8 @@ class Trainer:
                 batch,
                 obs_scale=self.config.obs_scale,
                 rng=self.rng,
+                td_coef=float(self.config.td_coef),
+                bc_coef=float(self.config.bc_coef),
             )
             if metrics.td_errors is not None and metrics.indices is not None:
                 self.buffer.update_priorities(metrics.indices, metrics.td_errors)
@@ -150,8 +234,18 @@ class Trainer:
                     "reward_mean": float(np.mean(self.buffer.rewards[: len(self.buffer)])),
                     "utd_ratio": utd_ratio,
                     "num_envs": self.num_envs,
+                    "collect_decode": self.config.collect_decode,
                 }
-                self.logger.log_step(self.logger.snapshot(extra))
+                snap = self.logger.snapshot(extra)
+                self.logger.log_step(snap)
+                print(
+                    f"step={self.env_steps} eps={self.epsilon:.3f} loss={metrics.loss:.4f} "
+                    f"score~{snap['mean_episode_score_recent']:.0f} "
+                    f"P2048={100 * snap['reached_2048_rate']:.1f}% "
+                    f"P4096={100 * snap['reached_4096_rate']:.1f}% "
+                    f"ep={snap['episodes']}",
+                    flush=True,
+                )
 
     def _after_env_step(self) -> None:
         """Advance counters that are tied to a single env transition."""
@@ -159,7 +253,8 @@ class Trainer:
         self.logger.state.env_steps = self.env_steps
         self._maybe_train_step()
         if self.env_steps % self.config.target_update_freq == 0:
-            self.agent.update_target()
+            if not self.config.freeze_target:
+                self.agent.update_target()
         if self.config.checkpoint_freq and self.env_steps % self.config.checkpoint_freq == 0:
             ckpt = self.run_dir / f"checkpoint_{self.env_steps}.pt"
             save_checkpoint(
@@ -181,13 +276,7 @@ class Trainer:
         try:
             while self.env_steps < self.config.total_env_steps:
                 self.epsilon = self._current_epsilon()
-                actions, random_flags = self.agent.select_actions(
-                    obs,
-                    masks,
-                    self.epsilon,
-                    obs_scale=self.config.obs_scale,
-                    generator=self.torch_generator,
-                )
+                actions, random_flags = self._select_rollout_actions(obs, masks)
                 for is_random in random_flags:
                     self.logger.note_action(is_random=bool(is_random))
 
@@ -216,13 +305,22 @@ class Trainer:
 
                     if terminations[i] or truncations[i]:
                         self._flush_n_step(i)
+                        length = int(episode_stat(next_infos, i, "episode_length"))
+                        score = int(episode_stat(next_infos, i, "game_score"))
+                        max_tile = int(episode_stat(next_infos, i, "max_tile"))
                         self.logger.note_episode_end(
-                            length=int(episode_stat(next_infos, i, "episode_length")),
-                            score=int(episode_stat(next_infos, i, "game_score")),
-                            max_tile=int(episode_stat(next_infos, i, "max_tile")),
+                            length=length,
+                            score=score,
+                            max_tile=max_tile,
                             reached_2048=bool(episode_stat(next_infos, i, "reached_2048", False)),
                             truncated=bool(truncations[i]),
                         )
+                        if max_tile >= 4096:
+                            print(
+                                f"  hit {max_tile} episode={self.episode_idx} "
+                                f"score={score} len={length} steps={self.env_steps}",
+                                flush=True,
+                            )
                         self.episode_idx += 1
 
                 obs = next_obs

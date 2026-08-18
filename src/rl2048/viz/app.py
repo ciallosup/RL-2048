@@ -12,6 +12,7 @@ from rl2048.policies.base import Policy, PolicyContext
 from rl2048.policies.dqn_policy import (
     DECODE_1PLY,
     DECODE_2PLY,
+    DECODE_3PLY,
     DECODE_GREEDY,
     DECODE_LABELS,
     DQNPolicy,
@@ -179,6 +180,7 @@ class VisualizerApp:
             (DECODE_GREEDY, "贪心 Q"),
             (DECODE_1PLY, "1-ply"),
             (DECODE_2PLY, "2-ply（默认）"),
+            (DECODE_3PLY, "3-ply（残局）"),
         ):
             btn = ttk.Radiobutton(
                 decode_row,

@@ -70,13 +70,23 @@ def _leaf_values(q_batch: np.ndarray, boards: list[np.ndarray]) -> np.ndarray:
 
 
 def resolve_search_depth(board: np.ndarray, depth: int, adaptive: bool) -> int:
-    """If adaptive, use depth>1 only in cramped / 1024 endgames."""
+    """Pick 1/2/3 ply. Depth 3 only on cramped high-tile boards."""
     depth = max(1, int(depth))
-    if depth == 1 or not adaptive:
-        return depth
     arr = np.asarray(board)
     empty = int(np.count_nonzero(arr == 0))
     max_tile = int(arr.max())
+
+    if depth >= 3:
+        # Keep depth-3 branching tiny: 3-ply with 5–6 empties is thousands of
+        # leaves per move and several minutes per 4096 game.
+        cramped_2048 = max_tile >= 2048 and empty <= 4
+        cramped_1024 = max_tile >= 1024 and empty <= 3
+        if cramped_2048 or cramped_1024:
+            return 3
+        return 2
+
+    if depth == 1 or not adaptive:
+        return depth
     if max_tile >= 1024 and empty <= 8:
         return depth
     if empty <= 4:
@@ -225,6 +235,128 @@ def _expectimax_depth2(
     return values
 
 
+def _build_state(
+    board: np.ndarray,
+    remaining: int,
+    leaf_boards: list[np.ndarray],
+    *,
+    reward_mode: str,
+    include_reward: bool,
+):
+    """Tree spec: ('L', idx) leaf, ('D',) dead, ('M', actions)."""
+    if remaining <= 0:
+        leaf_boards.append(np.asarray(board, dtype=np.int32).reshape(4, 4).copy())
+        return ("L", len(leaf_boards) - 1)
+    mask = valid_action_mask_fast(board)
+    legal = np.flatnonzero(mask)
+    if legal.size == 0:
+        return ("D",)
+    acts: list = []
+    for action in legal:
+        expanded = expand_action_successors(board, int(action), with_obs=False)
+        assert expanded is not None
+        successors, merge_score = expanded
+        train_r = transform_reward(float(merge_score), reward_mode) if include_reward else 0.0
+        if not successors:
+            acts.append((int(action), float(train_r), None))
+            continue
+        kids = [
+            (
+                float(succ.prob),
+                _build_state(
+                    succ.board,
+                    remaining - 1,
+                    leaf_boards,
+                    reward_mode=reward_mode,
+                    include_reward=include_reward,
+                ),
+            )
+            for succ in successors
+        ]
+        acts.append((int(action), float(train_r), kids))
+    return ("M", acts)
+
+
+def _eval_spec(spec, leaves: np.ndarray, gamma: float) -> float:
+    kind = spec[0]
+    if kind == "L":
+        return float(leaves[spec[1]])
+    if kind == "D":
+        return 0.0
+    best = -np.inf
+    for _action, train_r, kids in spec[1]:
+        if kids is None:
+            val = float(train_r)
+        else:
+            expected = 0.0
+            for prob, child in kids:
+                expected += prob * _eval_spec(child, leaves, gamma)
+            val = float(train_r) + gamma * expected
+        if val > best:
+            best = val
+    return 0.0 if not np.isfinite(best) else float(best)
+
+
+def _expectimax_general(
+    board: np.ndarray,
+    q_batch_fn,
+    *,
+    gamma: float,
+    reward_mode: str,
+    include_reward: bool,
+    depth: int,
+) -> np.ndarray:
+    """Depth >= 3: extra (max, chance) layers, then V = masked max Q."""
+    values = np.full(NUM_ACTIONS, -np.inf, dtype=np.float32)
+    mask = valid_action_mask_fast(board)
+    legal = np.flatnonzero(mask)
+    if legal.size == 0:
+        return values
+
+    leaf_boards: list[np.ndarray] = []
+    root_acts: list[tuple[int, float, list]] = []
+    for action in legal:
+        expanded = expand_action_successors(board, int(action), with_obs=False)
+        assert expanded is not None
+        successors, merge_score = expanded
+        train_r = transform_reward(float(merge_score), reward_mode) if include_reward else 0.0
+        if not successors:
+            values[int(action)] = np.float32(train_r)
+            continue
+        kids = [
+            (
+                float(succ.prob),
+                _build_state(
+                    succ.board,
+                    depth - 1,
+                    leaf_boards,
+                    reward_mode=reward_mode,
+                    include_reward=include_reward,
+                ),
+            )
+            for succ in successors
+        ]
+        root_acts.append((int(action), float(train_r), kids))
+
+    if leaf_boards:
+        obs_batch = boards_to_obs(leaf_boards)
+        q_batch = np.asarray(q_batch_fn(obs_batch), dtype=np.float32)
+        if q_batch.ndim != 2 or q_batch.shape[0] != len(leaf_boards):
+            raise ValueError(
+                f"q_batch_fn returned shape {q_batch.shape}, expected ({len(leaf_boards)}, 4)"
+            )
+        leaves = _leaf_values(q_batch, leaf_boards)
+    else:
+        leaves = np.zeros(0, dtype=np.float32)
+
+    for action, train_r, kids in root_acts:
+        expected_v = 0.0
+        for prob, child in kids:
+            expected_v += prob * _eval_spec(child, leaves, gamma)
+        values[action] = np.float32(train_r + gamma * expected_v)
+    return values
+
+
 def expectimax_action_values(
     board: np.ndarray,
     q_batch_fn,
@@ -240,6 +372,7 @@ def expectimax_action_values(
 
     depth=1: one move + spawn, V = masked max Q (original C0).
     depth=2: an extra reply + spawn before the Q leaves.
+    depth=3: one more ply; resolve_search_depth only uses it on cramped 1024/2048 boards.
 
     q_batch_fn: callable mapping obs array (N, 16) -> Q array (N, 4).
     Illegal actions stay -inf so argmax ignores them.
@@ -250,7 +383,7 @@ def expectimax_action_values(
         return _expectimax_depth1(board, q_batch_fn, **kwargs)
     if used_depth == 2:
         return _expectimax_depth2(board, q_batch_fn, **kwargs)
-    raise ValueError(f"expectimax depth {used_depth} is not supported (use 1 or 2)")
+    return _expectimax_general(board, q_batch_fn, depth=used_depth, **kwargs)
 
 
 def expectimax_select_action(
@@ -279,12 +412,16 @@ def expectimax_select_action(
     if not corner_tiebreak:
         return int(np.argmax(values))
 
+    margin = float(corner_margin)
+    if int(np.asarray(board).max()) >= 2048:
+        margin = max(margin, 4.0)
+
     finite = np.isfinite(values)
     best = float(np.max(values[finite]))
     candidates = [
         action
         for action in range(NUM_ACTIONS)
-        if finite[action] and float(values[action]) >= best - float(corner_margin)
+        if finite[action] and float(values[action]) >= best - margin
     ]
     if len(candidates) == 1:
         return int(candidates[0])

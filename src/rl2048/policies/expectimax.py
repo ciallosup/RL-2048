@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rl2048.policies.dqn_policy import DECODE_1PLY, DECODE_2PLY, DQNPolicy
+from rl2048.policies.dqn_policy import DECODE_1PLY, DECODE_2PLY, DECODE_3PLY, DQNPolicy
 
 
 class ExpectimaxDQNPolicy(DQNPolicy):
@@ -21,7 +21,13 @@ class ExpectimaxDQNPolicy(DQNPolicy):
         corner_tiebreak: bool = True,
         corner_margin: float = 2.0,
     ) -> None:
-        decode = DECODE_1PLY if int(depth) <= 1 else DECODE_2PLY
+        requested = max(1, int(depth))
+        if requested <= 1:
+            decode = DECODE_1PLY
+        elif requested == 2:
+            decode = DECODE_2PLY
+        else:
+            decode = DECODE_3PLY
         super().__init__(
             checkpoint_path=checkpoint_path,
             decode=decode,
@@ -30,7 +36,7 @@ class ExpectimaxDQNPolicy(DQNPolicy):
             corner_tiebreak=corner_tiebreak,
             corner_margin=corner_margin,
         )
-        self.depth = 1 if decode == DECODE_1PLY else 2
+        self.depth = requested
         self.label = (
             f"DQN expectimax d{self.depth}"
             f"{' adapt' if self.adaptive else ''}"

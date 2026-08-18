@@ -20,6 +20,7 @@ class LoggerState:
     episode_scores: list[int] = field(default_factory=list)
     episode_max_tiles: list[int] = field(default_factory=list)
     reached_2048_count: int = 0
+    reached_4096_count: int = 0
 
 
 class MetricsLogger:
@@ -54,6 +55,8 @@ class MetricsLogger:
         self.state.episode_max_tiles.append(max_tile)
         if reached_2048:
             self.state.reached_2048_count += 1
+        if max_tile >= 4096:
+            self.state.reached_4096_count += 1
         if truncated:
             self.state.truncation_count += 1
 
@@ -61,6 +64,7 @@ class MetricsLogger:
         episodes = max(self.state.episodes, 1)
         recent_scores = self.state.episode_scores[-100:]
         recent_lengths = self.state.episode_lengths[-100:]
+        recent_tiles = self.state.episode_max_tiles[-100:]
         payload: dict[str, Any] = {
             "episodes": self.state.episodes,
             "updates": self.state.updates,
@@ -68,7 +72,9 @@ class MetricsLogger:
             "truncation_rate": self.state.truncation_count / episodes,
             "mean_episode_score_recent": sum(recent_scores) / max(len(recent_scores), 1),
             "mean_episode_length_recent": sum(recent_lengths) / max(len(recent_lengths), 1),
+            "mean_max_tile_recent": sum(recent_tiles) / max(len(recent_tiles), 1),
             "reached_2048_rate": self.state.reached_2048_count / episodes,
+            "reached_4096_rate": self.state.reached_4096_count / episodes,
         }
         if extra:
             payload.update(extra)

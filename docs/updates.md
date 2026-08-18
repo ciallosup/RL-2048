@@ -68,4 +68,19 @@ python scripts/eval_expectimax.py --skip-smoke --force-full --seeds 0 \
   --max-steps 4000 --stop-on-2048 --depth 1 --no-corner-tiebreak
 ```
 
-可视化：`rl2048-play`，加载 checkpoint 后默认 **2-ply**，可切换贪心 Q / 1-ply / 2-ply。
+可视化：`rl2048-play`，加载 checkpoint 后默认 **2-ply**，可切换贪心 Q / 1-ply / 2-ply / 残局 3-ply。
+
+## 冲 4096 与贪心微调（C1 / C1b）
+
+Phase A 2-ply **打完局**（val 前 20，`max_steps=8000`，不停 2048）：均分 **50523**，P(2048)=100%，**P(4096)=55%**。残局 3-ply（2048 且空格≤4，或 1024 且空格≤3）把 P(4096) 拉到 **70%**，但约 8 min/局，默认推理仍用 2-ply。
+
+想让**纯贪心 Q** 自己看懂 2048/4096，试过两次从 Phase A 微调，**都没有超过发布权重**：
+
+| 设定 | 贪心均分 | 贪心 P(1024) | 2-ply 均分 | 2-ply P(4096) |
+|---|---:|---:|---:|---:|
+| Phase A | **5727** | **13.5%** | **50523** | **55%** |
+| C1（在线 Q 当 2-ply 叶子） | 2542 | 0% | 18874 | 0% |
+| C1b（冻结 Phase A 当老师 + BC） | 5406 | 6.5% | 50695 | 55% |
+
+C1：`configs/autodl/c1_finetune_4096.yaml`。叶子一漂，老师自己就不会打 4096，replay 变成弱局。C1b：`configs/autodl/c1b_frozen_teacher.yaml`。采集稳住了（训练局 P(2048)≈81%、P(4096)≈17%），但学生贪心没变强，2-ply 与 Phase A 持平。发布权重仍用 `checkpoints/phaseA_dueling_seed0.pt`。
+

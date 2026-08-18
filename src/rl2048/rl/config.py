@@ -53,6 +53,19 @@ class TrainConfig:
     per_beta_start: float = 0.4
     per_beta_frames: int = 1_000_000
     num_envs: int = 1  # >1 uses multi-process AsyncVectorEnv (multi-core)
+    init_checkpoint: str | None = None
+    # Rollout policy while collecting replay. greedy = epsilon-greedy Q.
+    # 2ply uses expectimax so fine-tune actually visits 2048/4096 boards.
+    collect_decode: str = "greedy"  # greedy | 1ply | 2ply | 3ply
+    collect_corner_tiebreak: bool = True
+    # Cap random actions once the max tile is this high (search endgames).
+    collect_endgame_epsilon: float = 0.02
+    collect_endgame_tile: int = 1024
+    # If true, 2-ply collection uses a frozen copy of init_checkpoint (not the online net).
+    collect_frozen_teacher: bool = False
+    bc_coef: float = 0.0  # cross-entropy toward the collected action
+    td_coef: float = 1.0
+    freeze_target: bool = False  # keep target at init weights
 
     def resolved_batch_size(self, device: torch.device) -> int:
         if self.batch_size is not None:

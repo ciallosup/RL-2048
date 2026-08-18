@@ -18,11 +18,18 @@ from rl2048.rl.search import expectimax_select_action
 DECODE_GREEDY = "greedy"
 DECODE_1PLY = "1ply"
 DECODE_2PLY = "2ply"
-DECODE_MODES = (DECODE_GREEDY, DECODE_1PLY, DECODE_2PLY)
+DECODE_3PLY = "3ply"
+DECODE_MODES = (DECODE_GREEDY, DECODE_1PLY, DECODE_2PLY, DECODE_3PLY)
 DECODE_LABELS = {
     DECODE_GREEDY: "DQN 贪心 Q",
     DECODE_1PLY: "DQN 1-ply",
     DECODE_2PLY: "DQN 2-ply",
+    DECODE_3PLY: "DQN 3-ply",
+}
+DECODE_DEPTH = {
+    DECODE_1PLY: 1,
+    DECODE_2PLY: 2,
+    DECODE_3PLY: 3,
 }
 
 
@@ -36,9 +43,11 @@ def normalize_decode(decode: str) -> str:
         "1": DECODE_1PLY,
         "2ply": DECODE_2PLY,
         "2": DECODE_2PLY,
+        "3ply": DECODE_3PLY,
+        "3": DECODE_3PLY,
     }
     if key not in aliases:
-        raise ValueError(f"Unknown decode mode {decode!r}; use greedy, 1ply, or 2ply.")
+        raise ValueError(f"Unknown decode mode {decode!r}; use greedy, 1ply, 2ply, or 3ply.")
     return aliases[key]
 
 
@@ -102,7 +111,7 @@ class DQNPolicy:
     def corner_tiebreak(self) -> bool:
         if self._corner_tiebreak_override is not None:
             return bool(self._corner_tiebreak_override)
-        return self.decode == DECODE_2PLY
+        return self.decode in (DECODE_2PLY, DECODE_3PLY)
 
     def reset(self, ctx: PolicyContext) -> None:
         return None
@@ -123,7 +132,7 @@ class DQNPolicy:
             gamma=self.gamma,
             reward_mode=self.reward_mode,
             include_reward=self.include_reward,
-            depth=1 if self.decode == DECODE_1PLY else 2,
+            depth=DECODE_DEPTH[self.decode],
             adaptive=self.adaptive,
             corner_tiebreak=self.corner_tiebreak,
             corner_margin=self.corner_margin,

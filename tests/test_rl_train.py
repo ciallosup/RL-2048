@@ -17,10 +17,39 @@ from rl2048.rl.trainer import Trainer
 
 def test_load_yaml_config(tmp_path):
     cfg_path = tmp_path / "cfg.yaml"
-    cfg_path.write_text("run_name: test\ntotal_env_steps: 123\n", encoding="utf-8")
+    cfg_path.write_text(
+        "run_name: test\ntotal_env_steps: 123\ninit_checkpoint: /tmp/foo.pt\n",
+        encoding="utf-8",
+    )
     cfg = load_config(cfg_path)
     assert cfg.run_name == "test"
     assert cfg.total_env_steps == 123
+    assert cfg.init_checkpoint == "/tmp/foo.pt"
+
+
+def test_collect_decode_yaml(tmp_path):
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(
+        "run_name: c1\ncollect_decode: 2ply\ncollect_endgame_tile: 1024\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(cfg_path)
+    assert cfg.collect_decode == "2ply"
+    assert cfg.collect_endgame_tile == 1024
+    assert cfg.collect_corner_tiebreak is True
+
+
+def test_c1b_yaml_fields(tmp_path):
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(
+        "collect_frozen_teacher: true\nbc_coef: 1.0\ntd_coef: 0.3\nfreeze_target: true\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(cfg_path)
+    assert cfg.collect_frozen_teacher is True
+    assert cfg.bc_coef == 1.0
+    assert cfg.td_coef == 0.3
+    assert cfg.freeze_target is True
 
 
 def test_checkpoint_roundtrip(tmp_path):
@@ -61,6 +90,8 @@ def test_dqn_policy_greedy_action(tmp_path):
     assert info["valid_action_mask"][action2]
     policy.set_decode("1ply")
     assert policy.decode == "1ply"
+    policy.set_decode("3ply")
+    assert policy.decode == "3ply"
 
 
 @pytest.mark.slow
@@ -98,3 +129,24 @@ def test_trainer_multi_env_short_run(tmp_path):
     assert result.env_steps == 256
     assert result.checkpoint_path.exists()
     assert result.episodes >= 1
+
+
+def test_trainer_collect_1ply_few_steps(tmp_path):
+    config = TrainConfig(
+        run_name="collect1",
+        total_env_steps=6,
+        learning_starts=1000,
+        train_freq=4,
+        log_freq=100,
+        checkpoint_freq=0,
+        output_dir=str(tmp_path),
+        num_envs=1,
+        collect_decode="1ply",
+        max_episode_steps=20,
+        device="cpu",
+        network_type="mlp",
+        obs_encoding="scaled",
+    )
+    result = Trainer(config).train()
+    assert result.env_steps == 6
+    assert result.checkpoint_path.exists()

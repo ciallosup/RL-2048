@@ -2,7 +2,7 @@
 
 用深度强化学习下 2048，并提供一套**可复现、可对照**的评测与可视化接口：同一规则、同一固定种子集，把强化学习策略和随机、启发式、一步贪心等传统方法放在一起比较。
 
-当前推荐用法：加载发布权重，默认用 **2-ply expectimax** 推理（可视化里也可切到贪心 Q 或 1-ply）。过程记录见 [`docs/updates.md`](docs/updates.md)。
+当前推荐用法：加载发布权重，默认用 **2-ply expectimax** 推理（可视化里也可切到贪心 Q、1-ply 或残局 3-ply）。过程记录见 [`docs/updates.md`](docs/updates.md)。从 Phase A 微调纯贪心 Q（C1 / C1b）没有超过发布权重，不要换 checkpoint。
 
 ## 结果对照
 
@@ -59,7 +59,7 @@ pytest
 rl2048-play
 ```
 
-加载 `checkpoints/phaseA_dueling_seed0.pt` 后默认 **2-ply**，可在右侧切换 **贪心 Q / 1-ply / 2-ply**。基线策略（随机、启发式、一步贪心、固定优先级、人工）无需 checkpoint。
+加载 `checkpoints/phaseA_dueling_seed0.pt` 后默认 **2-ply**，可在右侧切换 **贪心 Q / 1-ply / 2-ply / 残局 3-ply**。基线策略（随机、启发式、一步贪心、固定优先级、人工）无需 checkpoint。
 
 | 操作 | 功能 |
 |------|------|
