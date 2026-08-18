@@ -53,6 +53,7 @@ def normalize_decode(decode: str) -> str:
 
 class DQNPolicy:
     key = "dqn"
+    viz_label = "RL (DQN checkpoint)"
     label = DECODE_LABELS[DECODE_2PLY]
 
     def __init__(

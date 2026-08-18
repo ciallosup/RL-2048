@@ -15,7 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0.0"]
-viz = []
+viz = ["pillow>=10.0"]
 train = ["torch>=2.0", "pyyaml>=6.0"]
 
 [project.scripts]

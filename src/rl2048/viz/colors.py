@@ -40,3 +40,19 @@ def tile_bg(value: int) -> tuple[int, int, int]:
 
 def tile_fg(value: int) -> tuple[int, int, int]:
     return TEXT_DARK if value in TILE_TEXT_DARK else TEXT_LIGHT
+
+
+def tile_font_size(value: int, cell_px: int = 100) -> int:
+    """Point size for a cell. Larger numbers use a smaller font; scales with cell size."""
+    if value >= 100000:
+        base = 12
+    elif value >= 10000:
+        base = 14
+    elif value >= 1000:
+        base = 18
+    elif value >= 100:
+        base = 22
+    else:
+        base = 28
+    size = round(base * max(int(cell_px), 1) / 100)
+    return max(8, size)

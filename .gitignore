@@ -24,3 +24,7 @@ Thumbs.db
 
 # Local SSH snippets (host/port are machine-specific)
 scripts/ssh_config.local
+
+# Local notes / source PDFs (not part of the published repo)
+Discuss.md
+*.pdf

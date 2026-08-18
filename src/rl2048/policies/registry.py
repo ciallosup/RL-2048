@@ -26,10 +26,7 @@ POLICY_REGISTRY: dict[str, type] = {
 
 def list_policies() -> list[tuple[str, str]]:
     items = [(key, POLICY_REGISTRY[key].label) for key in POLICY_ORDER]
-    if os.environ.get("RL2048_CHECKPOINT"):
-        from rl2048.policies.dqn_policy import DQNPolicy
-
-        items.append((DQNPolicy.key, DQNPolicy.label))
+    items.append(("dqn", "RL (DQN checkpoint)"))
     return items
 
 

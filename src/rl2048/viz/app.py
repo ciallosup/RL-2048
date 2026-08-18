@@ -21,8 +21,11 @@ from rl2048.policies.manual import ManualPolicy
 from rl2048.policies.registry import get_policy, list_policies
 from rl2048.rl.checkpoint_catalog import discover_checkpoints
 from rl2048.viz import colors
+from rl2048.viz.layout import BOARD_FRAME_PAD, MIN_TILE_PX, board_geometry
 
 DEFAULT_STEP_MS = 350
+SIDE_PANEL_MIN = 360
+DEFAULT_CHECKPOINT = Path("checkpoints/phaseA_dueling_seed0.pt")
 
 
 class VisualizerApp:
@@ -40,6 +43,9 @@ class VisualizerApp:
         self.policy: Policy = get_policy("random")
         self.checkpoint_path: str | None = None
         self.checkpoint_meta: dict | None = None
+        self._dqn_policy: DQNPolicy | None = None
+        self._syncing_policy = False
+        self._tile_fonts: dict[int, tkfont.Font] = {}
         self.auto_play = False
         self.game_over = False
         self.last_action: int | None = None
@@ -49,17 +55,19 @@ class VisualizerApp:
         self._after_id: str | None = None
         self._checkpoints = discover_checkpoints()
         self._checkpoint_by_label: dict[str, str] = {}
+        self._tile_size_px = MIN_TILE_PX
+        self._tile_pad_px = 3
+        self._resize_after_id: str | None = None
 
         self._build_ui()
         self.reset_game()
         self.root.bind("<Key>", self._on_key)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.root.after_idle(self._apply_board_geometry)
 
     def _build_ui(self) -> None:
         self.title_font = tkfont.Font(family="Microsoft YaHei", size=20, weight="bold")
         self.label_font = tkfont.Font(family="Microsoft YaHei", size=11)
-        self.tile_font_l = tkfont.Font(family="Arial", size=28, weight="bold")
-        self.tile_font_s = tkfont.Font(family="Arial", size=18, weight="bold")
 
         top = tk.Frame(self.root, bg=_hex(colors.BG_COLOR))
         top.pack(fill=tk.X, padx=16, pady=(16, 8))
@@ -87,30 +95,57 @@ class VisualizerApp:
 
         body = tk.Frame(self.root, bg=_hex(colors.BG_COLOR))
         body.pack(fill=tk.BOTH, expand=True, padx=16, pady=8)
+        body.columnconfigure(0, weight=1)
+        body.columnconfigure(1, weight=0, minsize=SIDE_PANEL_MIN)
+        body.rowconfigure(0, weight=1)
 
-        board_frame = tk.Frame(body, bg=_hex(colors.GRID_COLOR), padx=8, pady=8)
-        board_frame.pack(side=tk.LEFT)
+        self.board_host = tk.Frame(body, bg=_hex(colors.BG_COLOR))
+        self.board_host.grid(row=0, column=0, sticky="nsew")
 
+        self.board_frame = tk.Frame(
+            self.board_host,
+            bg=_hex(colors.GRID_COLOR),
+            padx=BOARD_FRAME_PAD,
+            pady=BOARD_FRAME_PAD,
+        )
+        self.board_frame.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+
+        self.tile_cells: list[list[tk.Frame]] = []
         self.tile_labels: list[list[tk.Label]] = []
+        empty_bg = _hex(colors.tile_bg(0))
         for row in range(4):
+            row_cells: list[tk.Frame] = []
             row_labels: list[tk.Label] = []
-            row_frame = tk.Frame(board_frame, bg=_hex(colors.GRID_COLOR))
-            row_frame.pack()
             for col in range(4):
-                lbl = tk.Label(
-                    row_frame,
-                    width=8,
-                    height=3,
-                    font=self.tile_font_l,
-                    bg=_hex(colors.tile_bg(0)),
-                    fg=_hex(colors.tile_fg(2)),
+                cell = tk.Frame(
+                    self.board_frame,
+                    width=self._tile_size_px,
+                    height=self._tile_size_px,
+                    bg=empty_bg,
                 )
-                lbl.grid(row=0, column=col, padx=4, pady=4)
+                cell.grid(row=row, column=col, padx=self._tile_pad_px, pady=self._tile_pad_px)
+                cell.grid_propagate(False)
+                cell.pack_propagate(False)
+                lbl = tk.Label(
+                    cell,
+                    text="",
+                    font=self._tile_font(0),
+                    bg=empty_bg,
+                    fg=_hex(colors.tile_fg(2)),
+                    bd=0,
+                    highlightthickness=0,
+                )
+                lbl.place(relx=0, rely=0, relwidth=1, relheight=1)
+                row_cells.append(cell)
                 row_labels.append(lbl)
+            self.tile_cells.append(row_cells)
             self.tile_labels.append(row_labels)
 
-        side = tk.Frame(body, bg=_hex(colors.BG_COLOR))
-        side.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(24, 0))
+        self.board_host.bind("<Configure>", self._on_board_host_resize)
+
+        side = tk.Frame(body, bg=_hex(colors.BG_COLOR), width=SIDE_PANEL_MIN)
+        side.grid(row=0, column=1, sticky="ns", padx=(20, 0))
+        side.grid_propagate(True)
 
         tk.Label(
             side,
@@ -126,7 +161,7 @@ class VisualizerApp:
                 text=label,
                 value=key,
                 variable=self.selected_policy_key,
-                command=self._on_builtin_policy_change,
+                command=self._on_policy_change,
             ).pack(anchor=tk.W, pady=2)
 
         rl_frame = tk.LabelFrame(
@@ -260,14 +295,21 @@ class VisualizerApp:
     def _load_checkpoint(self, path: str) -> None:
         ckpt_path = str(Path(path).resolve())
         self.checkpoint_path = ckpt_path
-        self.policy = DQNPolicy.from_checkpoint(ckpt_path, decode=self.rl_decode_var.get())
+        policy = DQNPolicy.from_checkpoint(ckpt_path, decode=self.rl_decode_var.get())
+        self._dqn_policy = policy
+        self.policy = policy
+        self._syncing_policy = True
+        try:
+            self.selected_policy_key.set("dqn")
+        finally:
+            self._syncing_policy = False
         meta = next((item for item in self._checkpoints if item["path"] == ckpt_path), None)
         if meta is None:
             meta = next((item for item in discover_checkpoints(limit=200) if item["path"] == ckpt_path), {})
         self.checkpoint_meta = meta or {
-            "train_seed": self.policy.config.train_seed,
-            "env_steps": self.policy.meta.get("env_steps"),
-            "run_name": self.policy.config.run_name,
+            "train_seed": policy.config.train_seed,
+            "env_steps": policy.meta.get("env_steps"),
+            "run_name": policy.config.run_name,
         }
         seed = self.checkpoint_meta.get("train_seed")
         steps = self.checkpoint_meta.get("env_steps")
@@ -281,30 +323,61 @@ class VisualizerApp:
         self.reset_game()
 
     def _on_rl_decode_change(self) -> None:
-        if self.checkpoint_path is None:
-            return
         decode = self.rl_decode_var.get()
-        if isinstance(self.policy, DQNPolicy):
+        if self._dqn_policy is not None:
+            self._dqn_policy.set_decode(decode)
+        if self._is_rl_selected() and isinstance(self.policy, DQNPolicy):
             self.policy.set_decode(decode)
-        else:
-            self.policy = DQNPolicy.from_checkpoint(self.checkpoint_path, decode=decode)
         self._refresh_status()
 
     def _clear_checkpoint(self) -> None:
         self.checkpoint_path = None
         self.checkpoint_meta = None
+        self._dqn_policy = None
         self.checkpoint_var.set("")
         self.checkpoint_info_var.set("未加载 checkpoint")
-        self._on_builtin_policy_change()
+        if self.selected_policy_key.get() == "dqn":
+            self._syncing_policy = True
+            try:
+                self.selected_policy_key.set("random")
+            finally:
+                self._syncing_policy = False
+        self._on_policy_change()
 
-    def _on_builtin_policy_change(self) -> None:
-        if self.checkpoint_path:
+    def _default_checkpoint_path(self) -> str | None:
+        if DEFAULT_CHECKPOINT.exists():
+            return str(DEFAULT_CHECKPOINT.resolve())
+        if self._checkpoints:
+            return self._checkpoints[0]["path"]
+        return None
+
+    def _is_rl_selected(self) -> bool:
+        return self.selected_policy_key.get() == "dqn"
+
+    def _on_policy_change(self) -> None:
+        if self._syncing_policy:
             return
         was_auto = self.auto_play
         key = self.selected_policy_key.get()
-        self.policy = get_policy(key)
+        if key == "dqn":
+            if self._dqn_policy is not None:
+                self.policy = self._dqn_policy
+            else:
+                path = self.checkpoint_path or self._default_checkpoint_path()
+                if path:
+                    self._load_checkpoint(path)
+                    if was_auto:
+                        self.start_auto()
+                    return
+                self.checkpoint_info_var.set("请选择 checkpoint（浏览或下拉列表）")
+                self.reset_game()
+                return
+        else:
+            self.policy = get_policy(key)
         self.reset_game()
-        if key != "manual" and was_auto:
+        if key not in {"manual", "dqn"} and was_auto:
+            self.start_auto()
+        elif key == "dqn" and was_auto and isinstance(self.policy, DQNPolicy):
             self.start_auto()
 
     def _adjust_speed(self, delta: int) -> None:
@@ -333,7 +406,9 @@ class VisualizerApp:
     def start_auto(self) -> None:
         if self.game_over:
             return
-        if self.checkpoint_path is None and self.selected_policy_key.get() == "manual":
+        if self.selected_policy_key.get() == "manual":
+            return
+        if self._is_rl_selected() and not isinstance(self.policy, DQNPolicy):
             return
         self.auto_play = True
         self.btn_start.state(["disabled"])
@@ -365,6 +440,8 @@ class VisualizerApp:
     def do_step(self) -> None:
         if self.game_over:
             return
+        if self._is_rl_selected() and not isinstance(self.policy, DQNPolicy):
+            return
         action = self.policy.select_action(self.ctx)
         if action is None:
             return
@@ -380,27 +457,64 @@ class VisualizerApp:
         self._refresh_board()
         self._refresh_status()
 
+    def _tile_font(self, value: int) -> tkfont.Font:
+        size = colors.tile_font_size(value, cell_px=self._tile_size_px)
+        font = self._tile_fonts.get(size)
+        if font is None:
+            font = tkfont.Font(family="Arial", size=size, weight="bold")
+            self._tile_fonts[size] = font
+        return font
+
+    def _on_board_host_resize(self, event: tk.Event) -> None:
+        if event.widget is not self.board_host:
+            return
+        if self._resize_after_id is not None:
+            self.root.after_cancel(self._resize_after_id)
+        self._resize_after_id = self.root.after(16, self._apply_board_geometry)
+
+    def _apply_board_geometry(self) -> None:
+        self._resize_after_id = None
+        width = self.board_host.winfo_width()
+        height = self.board_host.winfo_height()
+        if width < 32 or height < 32:
+            return
+        tile, pad = board_geometry(width, height)
+        if tile == self._tile_size_px and pad == self._tile_pad_px:
+            return
+        self._tile_size_px = tile
+        self._tile_pad_px = pad
+        for row in range(4):
+            for col in range(4):
+                cell = self.tile_cells[row][col]
+                cell.configure(width=tile, height=tile)
+                cell.grid_configure(padx=pad, pady=pad)
+        self._refresh_board()
+
     def _refresh_board(self) -> None:
         board = self.env.board
         for row in range(4):
             for col in range(4):
                 value = int(board[row, col])
-                lbl = self.tile_labels[row][col]
-                lbl.configure(
+                bg = _hex(colors.tile_bg(value))
+                self.tile_cells[row][col].configure(bg=bg)
+                self.tile_labels[row][col].configure(
                     text=str(value) if value else "",
-                    bg=_hex(colors.tile_bg(value)),
+                    bg=bg,
                     fg=_hex(colors.tile_fg(value) if value else colors.TEXT_DARK),
-                    font=self.tile_font_s if value >= 1024 else self.tile_font_l,
+                    font=self._tile_font(value),
                 )
         self.score_var.set(f"分数: {self.ctx.info.get('game_score', 0)}")
         self.max_var.set(f"最大块: {self.ctx.info.get('max_tile', 0)}")
 
     def _active_policy_label(self) -> str:
-        if self.checkpoint_path:
-            decode = self.rl_decode_var.get()
-            mode = DECODE_LABELS.get(decode, decode)
-            return f"{mode} · {Path(self.checkpoint_path).name}"
-        return self.selected_policy_key.get()
+        if self._is_rl_selected():
+            if self.checkpoint_path:
+                decode = self.rl_decode_var.get()
+                mode = DECODE_LABELS.get(decode, decode)
+                return f"{mode} · {Path(self.checkpoint_path).name}"
+            return "RL（未加载 checkpoint）"
+        labels = dict(list_policies())
+        return labels.get(self.selected_policy_key.get(), self.selected_policy_key.get())
 
     def _refresh_status(self) -> None:
         lines = [
@@ -416,8 +530,10 @@ class VisualizerApp:
             lines.append("状态: 游戏结束")
         elif self.auto_play:
             lines.append("状态: 自动运行中")
-        elif self.checkpoint_path is None and self.selected_policy_key.get() == "manual":
+        elif self.selected_policy_key.get() == "manual":
             lines.append("状态: 人工 — 方向键 / WASD")
+        elif self._is_rl_selected() and not isinstance(self.policy, DQNPolicy):
+            lines.append("状态: 请先加载 RL checkpoint")
         else:
             lines.append("状态: 就绪 — 点击「开始」")
         self.status_var.set("\n".join(lines))
@@ -433,7 +549,7 @@ class VisualizerApp:
             self.reset_game()
         elif key == "n":
             self.do_step()
-        elif self.checkpoint_path is None and isinstance(self.policy, ManualPolicy):
+        elif self.selected_policy_key.get() == "manual" and isinstance(self.policy, ManualPolicy):
             action_map = {
                 "up": ACTION_UP,
                 "w": ACTION_UP,
@@ -449,6 +565,9 @@ class VisualizerApp:
                 self.do_step()
 
     def _on_close(self) -> None:
+        if self._resize_after_id is not None:
+            self.root.after_cancel(self._resize_after_id)
+            self._resize_after_id = None
         self._cancel_timer()
         self.root.destroy()
 
